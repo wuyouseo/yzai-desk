@@ -1,0 +1,33 @@
+[package]
+name = "yzai-desk"
+version = "0.5.5"
+description = "咏智桌面工具 (YZai Desk)"
+authors = ["无忧AI", "咏智AI团队"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "yzai_desk_lib"
+# The Windows desktop binary only links this crate as a Rust library. Building a
+# GNU cdylib would export every reachable symbol and exceeds PE's 65,535 export
+# limit before the actual application can be linked.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+arboard = "3.4"
+winreg = "0.52"
+windows-sys = { version = "0.52", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_ProcessStatus", "Win32_System_Threading"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["time"] }
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-global-shortcut = "2"

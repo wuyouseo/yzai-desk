@@ -1,0 +1,140 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "咏智桌面工具",
+  "version": "0.5.5",
+  "identifier": "com.yzai.desk",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "settings",
+        "title": "咏智桌面工具 - 配置中心",
+        "width": 950,
+        "height": 680,
+        "resizable": true,
+        "visible": false,
+        "decorations": true,
+        "transparent": false
+      },
+      {
+        "label": "quick-panel",
+        "title": "快捷助手",
+        "url": "index.html#/quick-panel",
+        "width": 650,
+        "height": 380,
+        "resizable": false,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
+      },
+      {
+        "label": "notification",
+        "title": "提醒通知",
+        "url": "index.html#/notification",
+        "width": 360,
+        "height": 110,
+        "resizable": false,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
+      },
+      {
+        "label": "mini-calendar",
+        "title": "咏智桌面日历",
+        "url": "index.html#/mini-widget/calendar",
+        "width": 300,
+        "height": 340,
+        "minWidth": 260,
+        "minHeight": 300,
+        "x": 36,
+        "y": 80,
+        "resizable": true,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true
+      },
+      {
+        "label": "mini-note",
+        "title": "咏智桌面便签",
+        "url": "index.html#/mini-widget/note",
+        "width": 300,
+        "height": 250,
+        "minWidth": 250,
+        "minHeight": 210,
+        "x": 356,
+        "y": 80,
+        "resizable": true,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true
+      },
+      {
+        "label": "mini-focus",
+        "title": "咏智桌面番茄钟",
+        "url": "index.html#/mini-widget/focus",
+        "width": 290,
+        "height": 240,
+        "minWidth": 260,
+        "minHeight": 220,
+        "x": 36,
+        "y": 440,
+        "resizable": true,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true
+      },
+      {
+        "label": "mini-weather",
+        "title": "咏智桌面天气",
+        "url": "index.html#/mini-widget/weather",
+        "width": 300,
+        "height": 175,
+        "minWidth": 260,
+        "minHeight": 150,
+        "x": 356,
+        "y": 350,
+        "resizable": true,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "skipTaskbar": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "resources": {
+      "resources/WebView2Loader.dll": "WebView2Loader.dll"
+    },
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh",
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"]
+      }
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
