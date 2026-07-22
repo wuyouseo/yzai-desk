@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Database,
   Flame,
+  Grid2X2,
   Info,
   Italic,
   LayoutDashboard,
@@ -71,15 +72,16 @@ import { lookupWeatherLocation, verifyWeatherLocation } from "../lib/weatherApi"
 
 const NAV = [
   ["overview", "今日总览", LayoutDashboard],
-  ["calendar", "日程管理", CalendarDays],
-  ["notes", "便签", NotebookPen],
+  ["calendar", "日程提醒", CalendarDays],
+  ["quadrants", "四象限", Grid2X2],
+  ["notes", "备忘录", NotebookPen],
   ["clipboard", "剪贴板", Clipboard],
-  ["focus", "专注统计", Flame],
+  ["focus", "番茄时间", Flame],
   ["assistant", "AI 助手", MessageCircleMore],
   ["settings", "系统设置", Settings],
 ];
 
-const APP_VERSION = "0.5.5";
+const APP_VERSION = "0.6.0";
 
 const SETTINGS_NAV = [
   ["general", "常规", Settings],
@@ -103,13 +105,20 @@ const EVENT_TYPES = {
   memo: { label: "备忘", description: "记录信息，不弹出提醒", icon: StickyNote },
 };
 
+const QUADRANTS = [
+  { id: "urgent-important", short: "重要且紧急", title: "重要且紧急", description: "立即处理，优先完成", tone: "danger" },
+  { id: "important-not-urgent", short: "重要不紧急", title: "重要不紧急", description: "规划时间，持续推进", tone: "purple" },
+  { id: "urgent-not-important", short: "紧急不重要", title: "紧急不重要", description: "快速处理或委派他人", tone: "amber" },
+  { id: "not-urgent-not-important", short: "不紧急不重要", title: "不紧急不重要", description: "减少投入，空闲时处理", tone: "muted" },
+];
+
 const getEventType = (event) => EVENT_TYPES[event?.kind] || EVENT_TYPES.schedule;
 
 const FALLBACK_SYSTEM_FONTS = ["Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "微软雅黑", "Arial"];
 
 const MINI_WIDGETS = [
   { id: "calendar", name: "桌面日历", description: "月份、日期和日程标记", icon: CalendarDays },
-  { id: "note", name: "桌面便签", description: "随手记录并自动保存", icon: NotebookPen },
+  { id: "note", name: "桌面备忘录", description: "随手记录并自动保存", icon: NotebookPen },
   { id: "focus", name: "番茄时间", description: "独立专注计时与控制", icon: Flame },
   { id: "weather", name: "天气挂件", description: "温度、体感和实时风速", icon: CloudSun },
 ];
@@ -156,6 +165,14 @@ const conversationTime = (value) => {
   const today = new Date();
   if (sameDay(date, today)) return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   return date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+};
+
+const answerMarkdown = (title, message) => {
+  const exportedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+  const answeredAt = message.created_at
+    ? new Date(message.created_at).toLocaleString("zh-CN", { hour12: false })
+    : "";
+  return `# ${title || "AI 回答"}\n\n> 保存时间：${exportedAt}${answeredAt ? `  \n> 回答时间：${answeredAt}` : ""}\n\n---\n\n${message.content || "（无文字内容）"}\n`;
 };
 
 function MarkdownMessage({ content }) {
@@ -210,6 +227,7 @@ function SettingsDashboard() {
   useEffect(() => {
     loadData().then(setData);
     const cleanups = [
+      subscribe("data-changed", (nextData) => setData(nextData)),
       subscribe("clipboard-changed", (item) => setData((current) => current && ({ ...current, clipboard: [item, ...current.clipboard] }))),
       subscribe("pomo-finished", async () => {
         setData(await loadData());
@@ -301,6 +319,7 @@ function SettingsDashboard() {
           <PageErrorBoundary key={active} onRecover={() => setActive("overview")}>
             {active === "overview" && <Overview data={data} todayEvents={todayEvents} setActive={setActive} openNewEvent={openNewEvent} commit={commit} />}
             {active === "calendar" && <CalendarPage data={data} month={month} setMonth={setMonth} openNewEvent={openNewEvent} setEventDraft={setEventDraft} commit={commit} />}
+            {active === "quadrants" && <FourQuadrantPage data={data} commit={commit} flash={flash} />}
             {active === "notes" && <NotesPage data={data} commit={commit} flash={flash} />}
             {active === "clipboard" && <ClipboardPage data={data} commit={commit} flash={flash} />}
             {active === "focus" && <FocusPage data={data} />}
@@ -408,23 +427,102 @@ function CalendarPage({ data, month, setMonth, openNewEvent, setEventDraft, comm
   </div>;
 }
 
+function FourQuadrantPage({ data, commit, flash }) {
+  const [drafts, setDrafts] = useState({});
+  const [filter, setFilter] = useState("pending");
+  const tasks = data.quadrant_tasks || [];
+  const pendingCount = tasks.filter((task) => !task.done).length;
+  const completedCount = tasks.length - pendingCount;
+  const visibleTasks = tasks.filter((task) => filter === "all" || (filter === "done" ? task.done : !task.done));
+
+  const addTask = async (quadrant) => {
+    const title = String(drafts[quadrant] || "").trim();
+    if (!title) return flash("请输入事项内容");
+    const now = new Date().toISOString();
+    await commit({
+      ...data,
+      quadrant_tasks: [{ id: uid(), title, quadrant, done: false, created_at: now, updated_at: now }, ...tasks],
+    }, `已添加到“${QUADRANTS.find((item) => item.id === quadrant)?.title}”`);
+    setDrafts((current) => ({ ...current, [quadrant]: "" }));
+  };
+
+  const updateTask = (id, patch, message) => commit({
+    ...data,
+    quadrant_tasks: tasks.map((task) => task.id === id ? { ...task, ...patch, updated_at: new Date().toISOString() } : task),
+  }, message);
+
+  const moveTask = (task, quadrant) => {
+    const target = QUADRANTS.find((item) => item.id === quadrant);
+    updateTask(task.id, { quadrant }, `已移动到“${target?.title || "四象限"}”`);
+  };
+
+  const removeTask = (id) => commit({
+    ...data,
+    quadrant_tasks: tasks.filter((task) => task.id !== id),
+  }, "四象限事项已删除");
+
+  return <div className="quadrant-page">
+    <section className="panel quadrant-summary">
+      <div><span className="eyebrow"><Grid2X2 /> PRIORITY MATRIX</span><h2>把事情放到正确的位置</h2><p>按重要性和紧急程度拆分任务，先完成真正影响结果的事项。</p></div>
+      <div className="quadrant-totals"><span><strong>{pendingCount}</strong><small>待处理</small></span><span><strong>{completedCount}</strong><small>已完成</small></span></div>
+      <div className="quadrant-filters" aria-label="四象限事项筛选">
+        {[['pending', '待处理'], ['all', '全部'], ['done', '已完成']].map(([key, label]) => <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}</button>)}
+      </div>
+    </section>
+
+    <section className="quadrant-grid">
+      {QUADRANTS.map((quadrant, index) => {
+        const quadrantTasks = visibleTasks
+          .filter((task) => task.quadrant === quadrant.id)
+          .sort((a, b) => Number(a.done) - Number(b.done) || new Date(b.updated_at) - new Date(a.updated_at));
+        return <article className={`panel quadrant-card tone-${quadrant.tone}`} key={quadrant.id}>
+          <header><span className="quadrant-index">0{index + 1}</span><div><h2>{quadrant.title}</h2><p>{quadrant.description}</p></div><strong>{quadrantTasks.length}</strong></header>
+          <form className="quadrant-add" onSubmit={(event) => { event.preventDefault(); addTask(quadrant.id); }}>
+            <input value={drafts[quadrant.id] || ""} maxLength="120" aria-label={`添加${quadrant.title}事项`} placeholder="输入事项，按回车添加" onChange={(event) => setDrafts((current) => ({ ...current, [quadrant.id]: event.target.value }))} />
+            <button type="submit" title={`添加到${quadrant.title}`}><Plus /></button>
+          </form>
+          <div className="quadrant-task-list">
+            {quadrantTasks.length ? quadrantTasks.map((task) => <div className={`quadrant-task ${task.done ? "done" : ""}`} key={task.id}>
+              <button className="task-check" title={task.done ? "标记为待处理" : "标记为已完成"} onClick={() => updateTask(task.id, { done: !task.done }, task.done ? "已恢复为待处理" : "事项已完成")}>{task.done && <Check />}</button>
+              <div><strong>{task.title}</strong><small>{task.done ? "已完成" : `创建于 ${new Date(task.created_at).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })}`}</small></div>
+              <select value={task.quadrant} aria-label={`移动“${task.title}”`} title="移动到其他象限" onChange={(event) => moveTask(task, event.target.value)}>{QUADRANTS.map((option) => <option key={option.id} value={option.id}>{option.short}</option>)}</select>
+              <button className="quadrant-delete" title="删除事项" onClick={() => removeTask(task.id)}><Trash2 /></button>
+            </div>) : <div className="quadrant-empty"><Grid2X2 /><span>{filter === "pending" ? "暂无待处理事项" : filter === "done" ? "暂无已完成事项" : "这个象限还是空的"}</span></div>}
+          </div>
+        </article>;
+      })}
+    </section>
+  </div>;
+}
+
 function NotesPage({ data, commit, flash }) {
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(data.notes[0]?.id || null);
   const [unlocked, setUnlocked] = useState(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [plainDraft, setPlainDraft] = useState(null);
+  const [titleDraft, setTitleDraft] = useState(null);
   const textareaRef = useRef(null);
+  const titleInputRef = useRef(null);
   const importTextRef = useRef(null);
   const current = data.notes.find((note) => note.id === selected);
   const editorContent = current?.encrypted
     ? unlocked?.content || ""
     : plainDraft?.id === current?.id ? plainDraft.content : current?.content || "";
+  const editorTitle = titleDraft?.id === current?.id ? titleDraft.title : current?.title || "";
   const update = (patch, message) => commit({ ...data, notes: data.notes.map((note) => note.id === selected ? { ...note, ...patch, updated_at: new Date().toISOString() } : note) }, message);
 
   useEffect(() => {
-    if (current && !current.encrypted) setPlainDraft({ id: current.id, content: current.content || "" });
-  }, [current?.id, current?.encrypted]);
+    if (current && !current.encrypted && document.activeElement !== textareaRef.current) {
+      setPlainDraft({ id: current.id, content: current.content || "" });
+    }
+  }, [current?.id, current?.content, current?.encrypted]);
+
+  useEffect(() => {
+    if (current && document.activeElement !== titleInputRef.current) {
+      setTitleDraft({ id: current.id, title: current.title || "" });
+    }
+  }, [current?.id, current?.title]);
 
   useEffect(() => {
     if (!current && data.notes.length) {
@@ -434,15 +532,18 @@ function NotesPage({ data, commit, flash }) {
     }
   }, [current, data.notes]);
 
-  const add = () => {
-    const note = { id: uid(), title: "未命名便签", content: "", category: "随记", updated_at: new Date().toISOString(), encrypted: false, pinned: false };
-    commit({ ...data, notes: [note, ...data.notes] }, "已创建便签");
+  const add = async () => {
+    const note = { id: uid(), title: "未命名备忘录", content: "", category: "随记", updated_at: new Date().toISOString(), encrypted: false, pinned: false };
+    await commit({ ...data, notes: [note, ...data.notes] }, "已创建备忘录");
     setSelected(note.id);
+    setTitleDraft({ id: note.id, title: note.title });
+    setPlainDraft({ id: note.id, content: "" });
     setMoreOpen(false);
+    requestAnimationFrame(() => titleInputRef.current?.select());
   };
-  const remove = () => {
+  const remove = async () => {
     const notes = data.notes.filter((note) => note.id !== selected);
-    commit({ ...data, notes }, "便签已删除");
+    await commit({ ...data, notes }, "备忘录已删除");
     setSelected(notes[0]?.id || null);
     setUnlocked(null);
     setMoreOpen(false);
@@ -452,10 +553,10 @@ function NotesPage({ data, commit, flash }) {
     if (!config) return null;
     const cached = getCachedNotePassword();
     if (cached && await verifyNotePassword(cached, config)) return cached;
-    const password = window.prompt("请输入统一便签密码");
+    const password = window.prompt("请输入统一备忘录密码");
     if (!password) return null;
     if (!await verifyNotePassword(password, config)) {
-      flash("统一便签密码不正确");
+      flash("统一备忘录密码不正确");
       return null;
     }
     setCachedNotePassword(password);
@@ -463,7 +564,7 @@ function NotesPage({ data, commit, flash }) {
   };
   const unlockNote = async () => {
     const config = data.settings.note_password_config;
-    const password = config ? await requestUnifiedPassword() : window.prompt("这是旧版加密便签，请输入原密码");
+    const password = config ? await requestUnifiedPassword() : window.prompt("这是旧版加密备忘录，请输入原密码");
     if (!password) return;
     try {
       const content = await decryptNote(current, password);
@@ -479,13 +580,13 @@ function NotesPage({ data, commit, flash }) {
       return;
     }
     if (!data.settings.note_password_config) {
-      flash("请先在设置中心 → 数据与备份中设置统一便签密码");
+      flash("请先在设置中心 → 数据与备份中设置统一备忘录密码");
       return;
     }
     const password = await requestUnifiedPassword();
     if (!password) return;
     const encrypted = await encryptNote(editorContent, password);
-    await update({ content: "", encrypted: true, ...encrypted }, "便签已锁定");
+    await update({ content: "", encrypted: true, ...encrypted }, "备忘录已锁定");
     setUnlocked(null);
   };
   const saveEditorDraft = async () => {
@@ -497,6 +598,12 @@ function NotesPage({ data, commit, flash }) {
       return;
     }
     if (editorContent !== (current.content || "")) await update({ content: editorContent });
+  };
+  const saveTitleDraft = async () => {
+    if (!current) return;
+    const title = editorTitle.trim() || "未命名备忘录";
+    setTitleDraft({ id: current.id, title });
+    if (title !== current.title) await update({ title }, "备忘录名称已保存");
   };
   const setEditorContent = (content) => {
     if (!current) return;
@@ -532,26 +639,36 @@ function NotesPage({ data, commit, flash }) {
     requestAnimationFrame(() => { editor.focus(); editor.setSelectionRange(selectionStart, selectionEnd); });
   };
   const togglePinned = () => {
-    update({ pinned: !current.pinned }, current.pinned ? "已取消置顶" : "便签已置顶");
+    update({ pinned: !current.pinned }, current.pinned ? "已取消置顶" : "备忘录已置顶");
     setMoreOpen(false);
   };
-  const exportText = () => {
-    if (current.encrypted && unlocked?.id !== current.id) return flash("请先解锁便签再导出");
+  const exportText = async () => {
+    if (current.encrypted && unlocked?.id !== current.id) return flash("请先解锁备忘录再导出");
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        const path = await callCommand("export_note_text", { title: current.title || "备忘录", content: editorContent });
+        setMoreOpen(false);
+        flash(`备忘录已导出到：${path}`);
+      } catch (error) {
+        flash(`备忘录导出失败：${error?.message || error}`);
+      }
+      return;
+    }
     const blob = new Blob([editorContent], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${(current.title || "便签").replace(/[\\/:*?"<>|]/g, "_")}.txt`;
+    link.download = `${(current.title || "备忘录").replace(/[\\/:*?"<>|]/g, "_")}.txt`;
     link.click();
     URL.revokeObjectURL(url);
     setMoreOpen(false);
-    flash("便签文本已导出");
+    flash("备忘录文本已导出");
   };
   const importText = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (current.encrypted && unlocked?.id !== current.id) {
-      flash("请先解锁便签再导入文本");
+      flash("请先解锁备忘录再导入文本");
     } else {
       const content = await file.text();
       if (current.encrypted) {
@@ -560,7 +677,7 @@ function NotesPage({ data, commit, flash }) {
         await update({ content: "", ...encrypted }, "文本已导入");
       } else {
         setPlainDraft({ id: current.id, content });
-        await update({ content, title: current.title === "未命名便签" ? file.name.replace(/\.[^.]+$/, "") : current.title }, "文本已导入");
+        await update({ content, title: ["未命名便签", "未命名备忘录"].includes(current.title) ? file.name.replace(/\.[^.]+$/, "") : current.title }, "文本已导入");
       }
     }
     event.target.value = "";
@@ -570,8 +687,8 @@ function NotesPage({ data, commit, flash }) {
     .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
 
   return <section className="panel notes-workspace">
-    <aside><div className="section-actions"><label className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索便签" /></label><button className="icon-button filled" onClick={add}><Plus /></button></div><div className="note-list">{filtered.map((note) => <button className={selected === note.id ? "active" : ""} key={note.id} onClick={() => { setSelected(note.id); setUnlocked(null); setMoreOpen(false); }}><span>{note.encrypted ? <LockKeyhole size={15} /> : <NotebookPen size={15} />}{note.category}{note.pinned && <em><Pin size={10} />置顶</em>}</span><strong>{note.title}</strong><p>{note.encrypted ? "AES-256-GCM 加密内容" : note.content || "空白便签"}</p><time>{new Date(note.updated_at).toLocaleDateString("zh-CN")}</time></button>)}</div></aside>
-    <div className="note-editor">{current ? <><div className="editor-toolbar"><input className="note-title" value={current.title} onChange={(e) => update({ title: e.target.value })} /><div><button className={`icon-button ${current.encrypted ? "locked" : ""}`} title={current.encrypted ? (unlocked?.id === current.id ? "锁定便签" : "解锁便签") : "锁定便签"} onClick={toggleLock}><LockKeyhole /></button><button className="icon-button danger" onClick={remove}><Trash2 /></button><div className="note-more"><button className={`icon-button ${moreOpen ? "active" : ""}`} title="更多操作" onClick={() => setMoreOpen((value) => !value)}><MoreHorizontal /></button>{moreOpen && <div className="note-more-menu"><button onClick={togglePinned}><Pin />{current.pinned ? "取消置顶" : "置顶便签"}</button><button onClick={() => { setMoreOpen(false); importTextRef.current?.click(); }}><FileUp />导入文本</button><button onClick={exportText}><FileDown />导出文本</button></div>}</div></div></div><div className="note-meta"><span>{current.category}</span><span>{current.encrypted ? "AES-256-GCM 加密存储" : "保存于本机"}</span>{current.pinned && <span>已置顶</span>}</div>{current.encrypted && unlocked?.id !== current.id ? <EmptyState icon={LockKeyhole} text="这条便签已加密" action="使用统一密码解锁" onClick={unlockNote} /> : <><div className="format-toolbar"><span>格式</span><button title="加粗" onClick={() => applyFormat("bold")}><Bold /></button><button title="斜体" onClick={() => applyFormat("italic")}><Italic /></button><i /><button title="无序列表" onClick={() => applyFormat("unordered")}><List /></button><button title="有序列表" onClick={() => applyFormat("ordered")}><ListOrdered /></button><small>支持 Markdown 格式</small></div><textarea ref={textareaRef} value={editorContent} onChange={(e) => setEditorContent(e.target.value)} onBlur={saveEditorDraft} placeholder="写下此刻的想法…" /></>}</> : <EmptyState icon={NotebookPen} text="选择或创建一条便签" action="新建便签" onClick={add} />}<input ref={importTextRef} type="file" hidden accept="text/plain,text/markdown,.txt,.md" onChange={importText} /></div>
+    <aside><div className="section-actions"><label className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索备忘录" /></label><button className="icon-button filled" title="新建备忘录" onClick={add}><Plus /></button></div><div className="note-list">{filtered.map((note) => <button className={selected === note.id ? "active" : ""} key={note.id} onClick={() => { setSelected(note.id); setUnlocked(null); setMoreOpen(false); }}><span>{note.encrypted ? <LockKeyhole size={15} /> : <NotebookPen size={15} />}{note.category}{note.pinned && <em><Pin size={10} />置顶</em>}</span><strong>{note.title}</strong><p>{note.encrypted ? "AES-256-GCM 加密内容" : note.content || "空白备忘录"}</p><time>{new Date(note.updated_at).toLocaleDateString("zh-CN")}</time></button>)}</div></aside>
+    <div className="note-editor">{current ? <><div className="editor-toolbar"><input ref={titleInputRef} className="note-title" value={editorTitle} maxLength="80" onChange={(event) => setTitleDraft({ id: current.id, title: event.target.value })} onBlur={saveTitleDraft} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><div><button className={`icon-button ${current.encrypted ? "locked" : ""}`} title={current.encrypted ? (unlocked?.id === current.id ? "锁定备忘录" : "解锁备忘录") : "锁定备忘录"} onClick={toggleLock}><LockKeyhole /></button><button className="icon-button danger" onClick={remove}><Trash2 /></button><div className="note-more"><button className={`icon-button ${moreOpen ? "active" : ""}`} title="更多操作" onClick={() => setMoreOpen((value) => !value)}><MoreHorizontal /></button>{moreOpen && <div className="note-more-menu"><button onClick={togglePinned}><Pin />{current.pinned ? "取消置顶" : "置顶备忘录"}</button><button onClick={() => { setMoreOpen(false); importTextRef.current?.click(); }}><FileUp />导入文本</button><button onClick={exportText}><FileDown />导出文本</button></div>}</div></div></div><div className="note-meta"><span>{current.category}</span><span>{current.encrypted ? "AES-256-GCM 加密存储" : "保存于本机"}</span>{current.pinned && <span>已置顶</span>}</div>{current.encrypted && unlocked?.id !== current.id ? <EmptyState icon={LockKeyhole} text="这条备忘录已加密" action="使用统一密码解锁" onClick={unlockNote} /> : <><div className="format-toolbar"><span>格式</span><button title="加粗" onClick={() => applyFormat("bold")}><Bold /></button><button title="斜体" onClick={() => applyFormat("italic")}><Italic /></button><i /><button title="无序列表" onClick={() => applyFormat("unordered")}><List /></button><button title="有序列表" onClick={() => applyFormat("ordered")}><ListOrdered /></button><small>支持 Markdown 格式</small></div><textarea ref={textareaRef} value={editorContent} onChange={(e) => setEditorContent(e.target.value)} onBlur={saveEditorDraft} placeholder="写下此刻的想法…" /></>}</> : <EmptyState icon={NotebookPen} text="选择或创建一条备忘录" action="新建备忘录" onClick={add} />}<input ref={importTextRef} type="file" hidden accept="text/plain,text/markdown,.txt,.md" onChange={importText} /></div>
   </section>;
 }
 
@@ -685,6 +802,7 @@ function AssistantPage({ data, commit, flash }) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [savingAnswerId, setSavingAnswerId] = useState(null);
   const fileInputRef = useRef(null);
   const messageListRef = useRef(null);
   const activeConversation = conversations.find((conversation) => conversation.id === selectedId);
@@ -727,6 +845,36 @@ function AssistantPage({ data, commit, flash }) {
     const remaining = conversations.filter((conversation) => conversation.id !== id);
     if (selectedId === id) setSelectedId(remaining[0]?.id || "new");
     await commit({ ...data, ai_conversations: remaining }, "历史对话已删除");
+  };
+
+  const saveAssistantAnswer = async (message) => {
+    if (!message?.content || savingAnswerId) return;
+    const conversationTitle = activeConversation?.title || "AI 对话";
+    const title = `${conversationTitle}-AI回答`;
+    const content = answerMarkdown(conversationTitle, message);
+    setSavingAnswerId(message.id);
+    try {
+      if (window.__TAURI_INTERNALS__) {
+        const path = await callCommand("export_ai_chat_markdown", {
+          title,
+          content,
+        });
+        flash(`回答已保存为 Markdown：${path}`);
+      } else {
+        const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
+        link.click();
+        URL.revokeObjectURL(url);
+        flash("回答已保存为 Markdown");
+      }
+    } catch (error) {
+      flash(`回答保存失败：${error?.message || error}`);
+    } finally {
+      setSavingAnswerId(null);
+    }
   };
 
   const attachFiles = async (event) => {
@@ -822,7 +970,6 @@ function AssistantPage({ data, commit, flash }) {
         <div className="assistant-head">
           <span className="ai-orb"><Sparkles /></span>
           <div><h2>{activeConversation?.title || "新对话"}</h2><p>{activeProvider?.api_key ? `${activeProvider.name} · ${activeProvider.model_id}` : "尚未配置当前 AI 服务的 API Key"}</p></div>
-          <button className="ghost-button assistant-new-button" onClick={startNewConversation} disabled={loading}><MessageSquarePlus />新对话</button>
         </div>
 
         <div className="message-list" ref={messageListRef}>
@@ -840,7 +987,12 @@ function AssistantPage({ data, commit, flash }) {
               <div className="message-column">
                 <AttachmentList attachments={message.attachments} />
                 <div className="message-bubble">{message.content ? <MarkdownMessage content={message.content} /> : <i className="typing" />}</div>
-                {message.role === "assistant" && message.content && <button className="message-copy" onClick={() => { navigator.clipboard.writeText(message.content); flash("回答已复制"); }}><Copy />复制回答</button>}
+                {message.role === "assistant" && message.content && (
+                  <div className="message-actions">
+                    <button onClick={() => { navigator.clipboard.writeText(message.content); flash("回答已复制"); }}><Copy />复制回答</button>
+                    <button disabled={Boolean(savingAnswerId)} onClick={() => saveAssistantAnswer(message)}><FileDown />{savingAnswerId === message.id ? "保存中…" : "保存"}</button>
+                  </div>
+                )}
               </div>
             </article>
           ))}
@@ -870,6 +1022,10 @@ function SettingsPage({ data, commit, importRef, flash }) {
   const [memoryStatus, setMemoryStatus] = useState(null);
   const [weatherCityInput, setWeatherCityInput] = useState(settings.weather_city || "");
   const [weatherCityPending, setWeatherCityPending] = useState(false);
+  const [storageInfo, setStorageInfo] = useState(null);
+  const [storagePathDraft, setStoragePathDraft] = useState("");
+  const [storagePending, setStoragePending] = useState(false);
+  const [backupPending, setBackupPending] = useState(false);
   const settingsDetailRef = useRef(null);
   useEffect(() => {
     callCommand("get_mini_widget_states").then((states) => setMiniWidgetStates(states || {}));
@@ -877,6 +1033,17 @@ function SettingsPage({ data, commit, importRef, flash }) {
       if (Array.isArray(fonts) && fonts.length) setSystemFonts(fonts);
     });
     callCommand("install_desktop_context_menu").catch(() => {});
+    callCommand("get_storage_info").then((info) => {
+      setStorageInfo(info || {
+        root_path: "软件安装目录\\data",
+        data_file: "软件安装目录\\data\\data.json",
+        backups_path: "软件安装目录\\data\\backups",
+        notes_path: "软件安装目录\\data\\notes",
+        ai_chats_path: "软件安装目录\\data\\ai-chats",
+        default_path: "软件安装目录\\data",
+        is_custom: false,
+      });
+    });
   }, []);
   useEffect(() => {
     settingsDetailRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -884,6 +1051,9 @@ function SettingsPage({ data, commit, importRef, flash }) {
   useEffect(() => {
     setWeatherCityInput(settings.weather_city || "");
   }, [settings.weather_city]);
+  useEffect(() => {
+    if (storageInfo?.root_path) setStoragePathDraft(storageInfo.root_path);
+  }, [storageInfo?.root_path]);
   useEffect(() => {
     if (section !== "about") return undefined;
     let active = true;
@@ -947,10 +1117,71 @@ function SettingsPage({ data, commit, importRef, flash }) {
     try { await commit(await readBackup(file), "数据已恢复"); } catch (error) { flash(error.message); }
     event.target.value = "";
   };
-  const copyDataPath = async () => {
-    await callCommand("clean_paste", { text: "%APPDATA%\\yzai-desk\\data.json" });
-    if (!window.__TAURI_INTERNALS__) await navigator.clipboard?.writeText("%APPDATA%\\yzai-desk\\data.json");
-    flash("本地数据路径已复制");
+  const copyStoragePath = async () => {
+    const path = storageInfo?.root_path || "软件安装目录\\data";
+    await callCommand("clean_paste", { text: path });
+    if (!window.__TAURI_INTERNALS__) await navigator.clipboard?.writeText(path);
+    flash("本地存储路径已复制");
+  };
+  const openStoragePath = async () => {
+    if (!window.__TAURI_INTERNALS__) return;
+    try { await callCommand("open_storage_directory"); } catch (error) { flash(`无法打开目录：${error?.message || error}`); }
+  };
+  const applyStoragePath = async (path = storagePathDraft) => {
+    if (storagePending) return;
+    const selectedPath = String(path || "").trim();
+    if (!selectedPath) return flash("请输入或选择本地存储目录");
+    setStoragePending(true);
+    try {
+      const info = await callCommand("set_storage_directory", { path: selectedPath });
+      setStorageInfo(info);
+      flash("存储位置已更新，现有数据和迁移备份已复制到新目录");
+    } catch (error) {
+      flash(`存储位置更新失败：${error?.message || error}`);
+    } finally {
+      setStoragePending(false);
+    }
+  };
+  const chooseStoragePath = async () => {
+    if (storagePending) return;
+    try {
+      const path = await callCommand("choose_storage_directory");
+      if (!path) return;
+      setStoragePathDraft(path);
+      await applyStoragePath(path);
+    } catch (error) {
+      flash(`文件夹选择失败：${error?.message || error}，也可以直接粘贴路径后保存`);
+    }
+  };
+  const resetStoragePath = async () => {
+    if (storagePending || !window.confirm("恢复到软件安装目录下的 data 文件夹？现有数据会复制过去，当前目录不会删除。")) return;
+    setStoragePending(true);
+    try {
+      const info = await callCommand("set_storage_directory", { path: null });
+      setStorageInfo(info);
+      setStoragePathDraft(info.root_path);
+      flash("已恢复默认存储位置，现有数据已安全迁移");
+    } catch (error) {
+      flash(`恢复默认位置失败：${error?.message || error}`);
+    } finally {
+      setStoragePending(false);
+    }
+  };
+  const createLocalBackup = async () => {
+    if (backupPending) return;
+    setBackupPending(true);
+    try {
+      if (!window.__TAURI_INTERNALS__) {
+        exportBackup(data);
+        return;
+      }
+      const path = await callCommand("create_backup");
+      flash(`备份已保存到：${path}`);
+    } catch (error) {
+      flash(`备份失败：${error?.message || error}`);
+    } finally {
+      setBackupPending(false);
+    }
   };
   const memoryMb = Number(memoryStatus?.working_set_mb || 0);
   const memoryLevel = memoryMb < 200 ? "运行良好" : memoryMb < 400 ? "占用适中" : "占用较高";
@@ -958,6 +1189,10 @@ function SettingsPage({ data, commit, importRef, flash }) {
   const openWebsite = async () => {
     if (window.__TAURI_INTERNALS__) await openUrl("https://yzai.eu.cc");
     else window.open("https://yzai.eu.cc", "_blank", "noopener,noreferrer");
+  };
+  const openRepository = async () => {
+    if (window.__TAURI_INTERNALS__) await openUrl("https://github.com/wuyouseo/yzai-desk");
+    else window.open("https://github.com/wuyouseo/yzai-desk", "_blank", "noopener,noreferrer");
   };
 
   return <div className="settings-workspace">
@@ -989,11 +1224,11 @@ function SettingsPage({ data, commit, importRef, flash }) {
       </div>}
 
       {section === "widgets" && <div className="settings-stack">
-        <SettingsCard title="独立桌面挂件" description="按需添加日历、便签、番茄钟和天气；每个挂件都能独立拖动与缩放。">
+        <SettingsCard title="独立桌面挂件" description="按需添加日历、备忘录、番茄钟和天气；每个挂件都能独立拖动与缩放。">
           <div className="widget-catalog">{MINI_WIDGETS.map((widget) => { const WidgetIcon = widget.icon; const visible = Boolean(miniWidgetStates[widget.id]); const pending = miniWidgetPending === widget.id; return <article key={widget.id} className={visible ? "active" : ""}><span><WidgetIcon /></span><div><strong>{widget.name}</strong><small>{widget.description}</small></div><button className={visible ? "ghost-button" : "primary-button"} disabled={Boolean(miniWidgetPending)} onClick={() => toggleMiniWidget(widget.id)}>{pending ? "处理中…" : visible ? "隐藏" : "添加"}</button></article>; })}</div>
           <div className="desktop-menu-tip"><MoreHorizontal /><p><strong>桌面右键快捷添加</strong>在 Windows 桌面空白处点击右键，选择“咏智桌面挂件”，即可直接添加任一挂件。</p></div>
         </SettingsCard>
-        <SettingsCard title="挂件外观与兼容性" description="统一调整日历、便签、番茄钟和天气四个独立挂件的显示效果。">
+        <SettingsCard title="挂件外观与兼容性" description="统一调整日历、备忘录、番茄钟和天气四个独立挂件的显示效果。">
           <SettingRow title="挂件兼容模式" description="关闭高开销背景模糊，适合 Windows 11 24H2/25H2 或集成显卡电脑"><Toggle checked={settings.widget_compatibility_mode !== false} onChange={(value) => update({ widget_compatibility_mode: value }, value ? "已启用挂件兼容模式" : "已启用完整视觉效果")} /></SettingRow>
           <RangeRow label="不透明度" value={settings.opacity} min="55" max="100" onChange={(value) => update({ opacity: value })} />
           <RangeRow label="背景模糊" value={settings.blur} min="0" max="36" suffix=" px" onChange={(value) => update({ blur: value })} />
@@ -1004,28 +1239,29 @@ function SettingsPage({ data, commit, importRef, flash }) {
 
       {section === "data" && <div className="settings-stack">
         <NotePasswordSettings data={data} commit={commit} flash={flash} />
-        <SettingsCard title="本地数据备份" description="导出日程、便签、剪贴板记录和全部设置。">
-          <div className="backup-actions"><button className="ghost-button" onClick={() => importRef.current?.click()}><Upload size={16} /> 导入备份</button><button className="primary-button" onClick={() => exportBackup(data)}><Download size={16} /> 导出 JSON</button><input ref={importRef} type="file" hidden accept="application/json" onChange={importFile} /></div>
+        <SettingsCard title="本地存储位置" description="统一存放核心数据、备份文件、备忘录导出和 AI 对话归档；默认位于软件安装目录的 data 文件夹。" action={<span className={`storage-status ${storageInfo?.is_custom ? "custom" : ""}`}>{storageInfo?.is_custom ? "自定义位置" : "默认位置"}</span>}>
+          <div className="data-location"><Database /><div><strong title={storageInfo?.root_path}>{storageInfo?.root_path || "正在读取存储位置…"}</strong><span>{storageInfo?.is_custom ? "当前使用用户指定目录" : "软件安装目录下的 data 文件夹"}</span></div></div>
+          <div className="storage-path-editor"><input value={storagePathDraft} disabled={storagePending} aria-label="本地存储目录" placeholder="例如 D:\\YZaiData" onChange={(event) => setStoragePathDraft(event.target.value)} /><button className="ghost-button" disabled={storagePending} onClick={chooseStoragePath}><FileUp size={15} />浏览</button></div>
+          <div className="storage-actions"><button className="primary-button" disabled={storagePending || !storagePathDraft.trim()} onClick={() => applyStoragePath()}>{storagePending ? "正在迁移…" : "保存位置"}</button><button className="ghost-button" disabled={!storageInfo || storagePending} onClick={openStoragePath}><ExternalLink size={15} />打开文件夹</button><button className="ghost-button" disabled={!storageInfo || storagePending} onClick={copyStoragePath}><Copy size={14} />复制路径</button>{storageInfo?.is_custom && <button className="ghost-button" disabled={storagePending} onClick={resetStoragePath}>恢复默认</button>}</div>
+          <div className="privacy-note"><ShieldCheck /><p><strong>安全迁移</strong>更换目录时会先复制现有数据并创建迁移备份，不删除原目录。AI 对话会同步归档到 <code>ai-chats/conversations.json</code>。</p></div>
         </SettingsCard>
-        <SettingsCard title="本地存储" description="所有核心数据默认保存在当前 Windows 用户目录。">
-          <div className="data-location"><Database /><div><strong>%APPDATA%\yzai-desk\data.json</strong><span>包含设置、日程、便签、统计与剪贴板历史</span></div><button className="ghost-button" onClick={copyDataPath}><Copy size={14} />复制路径</button></div>
-          <div className="privacy-note"><ShieldCheck /><p><strong>本地优先</strong>除天气和你主动配置的 AI 服务外，应用不会把本地数据发送到其他服务器。</p></div>
+        <SettingsCard title="本地数据备份" description="创建完整 JSON 备份并自动保存到当前数据目录的 backups 文件夹。">
+          <div className="backup-summary"><Download /><p><strong>备份包含全部本地数据</strong><span>日程、四象限、备忘录、剪贴板、番茄统计、AI 对话和应用设置。</span></p></div>
+          <div className="backup-actions"><button className="ghost-button" disabled={backupPending} onClick={() => importRef.current?.click()}><Upload size={16} /> 导入备份</button><button className="primary-button" disabled={backupPending} onClick={createLocalBackup}><Download size={16} /> {backupPending ? "正在备份…" : "立即备份"}</button><input ref={importRef} type="file" hidden accept="application/json" onChange={importFile} /></div>
+          <div className="backup-warning"><Info /><span>备份可能包含 AI 服务配置，请妥善保管；应用不会主动上传备份文件。</span></div>
         </SettingsCard>
       </div>}
 
       {section === "about" && <div className="settings-stack">
         <section className="panel about-hero"><span className="brand-mark"><Sparkles /></span><div><small>YZAI DESK</small><h2>咏智桌面工具</h2><p>把日程、速记、剪贴板与 AI 助手留在一个轻量桌面工作台里。</p></div><span className="version-pill">v{APP_VERSION}</span></section>
         <SettingsCard title="版本信息" description="当前应用与运行环境。">
-          <div className="about-list"><div><span>应用版本</span><strong>{APP_VERSION} 测试版</strong></div><div><span>桌面框架</span><strong>Tauri 2 + React 19</strong></div><div><span>数据位置</span><strong>Windows 用户本地目录</strong></div><div><span>更新方式</span><strong>当前为手动更新</strong></div></div>
+          <div className="about-list"><div><span>应用版本</span><strong>{APP_VERSION} 测试版</strong></div><div><span>桌面框架</span><strong>Tauri 2 + React 19</strong></div><div><span>数据位置</span><strong>安装目录 / 用户自定义</strong></div><div><span>更新方式</span><strong>当前为手动更新</strong></div></div>
         </SettingsCard>
         <SettingsCard title="开发信息" description="咏智桌面工具的开发与维护团队。">
-          <div className="developer-info"><span className="brand-mark"><Sparkles /></span><div><small>开发作者</small><strong>无忧AI</strong></div><div><small>开发团队</small><strong>咏智AI团队</strong></div><button className="ghost-button" onClick={openWebsite}><ExternalLink />yzai.eu.cc</button></div>
+          <div className="developer-info"><span className="brand-mark"><Sparkles /></span><div><small>开发作者</small><strong>无忧AI</strong></div><div><small>开发团队</small><strong>咏智AI团队</strong></div><div className="developer-links"><button className="ghost-button" onClick={openWebsite}><ExternalLink />yzai.eu.cc</button><button className="ghost-button" onClick={openRepository}><ExternalLink />GitHub · wuyouseo/yzai-desk</button></div></div>
         </SettingsCard>
         <SettingsCard title="系统占用状态" description="显示当前咏智桌面进程的实时内存工作集，每 5 秒刷新。">
           <div className="memory-status"><span><MemoryStick /></span><div><small>当前应用内存</small><strong>{memoryMb ? `${memoryMb.toFixed(1)} MB` : "正在读取…"}</strong><em className={memoryMb >= 400 ? "high" : memoryMb >= 200 ? "medium" : ""}>{memoryMb ? memoryLevel : "桌面端实时统计"}</em></div><div className="memory-meter"><i style={{ width: `${memoryPercent}%` }} /></div></div>
-        </SettingsCard>
-        <SettingsCard title="隐私与协议" description="当前版本的能力边界。">
-          <div className="about-copy"><p>便签可使用 AES-256-GCM 加密；主密码不会写入本地文件。</p><p>自定义 AI 服务的 API Key 当前随本地设置保存，请只在受信任的电脑上使用。</p><p>本项目仍处于内部测试阶段，安装器、自动更新与代码签名尚未发布。</p></div>
         </SettingsCard>
       </div>}
     </div>
@@ -1047,9 +1283,9 @@ function NotePasswordSettings({ data, commit, flash }) {
 
   const savePassword = async (event) => {
     event.preventDefault();
-    if (newPassword.length < 6) return flash("统一便签密码至少需要 6 位");
+    if (newPassword.length < 6) return flash("统一备忘录密码至少需要 6 位");
     if (newPassword !== confirmPassword) return flash("两次输入的新密码不一致");
-    if (needsCurrent && !currentPassword) return flash(config ? "请输入当前统一密码" : "请输入旧加密便签的密码");
+    if (needsCurrent && !currentPassword) return flash(config ? "请输入当前统一密码" : "请输入旧加密备忘录的密码");
     setBusy(true);
     try {
       if (config && !await verifyNotePassword(currentPassword, config)) {
@@ -1066,24 +1302,24 @@ function NotePasswordSettings({ data, commit, flash }) {
         notes.push({ ...note, content: "", ...encrypted });
       }
       const notePasswordConfig = await createNotePasswordConfig(newPassword);
-      await commit({ ...data, notes, settings: { ...data.settings, note_password_config: notePasswordConfig } }, config ? "统一便签密码已更新" : "统一便签密码已设置");
+      await commit({ ...data, notes, settings: { ...data.settings, note_password_config: notePasswordConfig } }, config ? "统一备忘录密码已更新" : "统一备忘录密码已设置");
       setCachedNotePassword(newPassword);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (error) {
-      flash(error.message === "密码不正确，无法解锁这条便签" ? "旧密码无法解锁已有加密便签，未修改任何数据" : error.message);
+      flash(error.message === "密码不正确，无法解锁这条备忘录" ? "旧密码无法解锁已有加密备忘录，未修改任何数据" : error.message);
     } finally {
       setBusy(false);
     }
   };
 
-  return <SettingsCard title="便签锁定密码" description="为所有便签设置统一的锁定与解锁密码。密码只在当前运行会话中短暂缓存，不保存明文。" action={<span className={`password-status ${config ? "configured" : ""}`}>{config ? "已设置" : "未设置"}</span>}>
+  return <SettingsCard title="备忘录锁定密码" description="为所有备忘录设置统一的锁定与解锁密码。密码只在当前运行会话中短暂缓存，不保存明文。" action={<span className={`password-status ${config ? "configured" : ""}`}>{config ? "已设置" : "未设置"}</span>}>
     <form className="password-settings" onSubmit={savePassword}>
-      {needsCurrent && <label className="full"><span>{config ? "当前统一密码" : "旧加密便签密码"}</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder={config ? "用于验证身份和迁移已有便签" : "用于迁移旧版加密便签"} /></label>}
-      <label><span>{config ? "新的统一密码" : "统一便签密码"}</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 6 位" /></label>
+      {needsCurrent && <label className="full"><span>{config ? "当前统一密码" : "旧加密备忘录密码"}</span><input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder={config ? "用于验证身份和迁移已有备忘录" : "用于迁移旧版加密备忘录"} /></label>}
+      <label><span>{config ? "新的统一密码" : "统一备忘录密码"}</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="至少 6 位" /></label>
       <label><span>确认新密码</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="再次输入新密码" /></label>
-      <div className="password-note"><ShieldCheck /><p>{encryptedCount ? `保存后会使用新密码重新加密 ${encryptedCount} 条已锁定便签。` : "设置后，点击便签工具栏的锁图标即可使用统一密码锁定。"}</p></div>
+      <div className="password-note"><ShieldCheck /><p>{encryptedCount ? `保存后会使用新密码重新加密 ${encryptedCount} 条已锁定备忘录。` : "设置后，点击备忘录工具栏的锁图标即可使用统一密码锁定。"}</p></div>
       <button className="primary-button" disabled={busy}>{busy ? "正在安全迁移…" : config ? "更新统一密码" : "设置统一密码"}</button>
     </form>
   </SettingsCard>;

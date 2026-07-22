@@ -92,7 +92,7 @@ pub fn register_desktop_context_menu() -> Result<(), String> {
 
     let items = [
         ("01_calendar", "添加桌面日历", "calendar"),
-        ("02_note", "添加桌面便签", "note"),
+        ("02_note", "添加桌面备忘录", "note"),
         ("03_focus", "添加番茄时间", "focus"),
         ("04_weather", "添加天气挂件", "weather"),
     ];

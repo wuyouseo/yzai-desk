@@ -118,7 +118,9 @@ graph TD
 4. **延迟自动清理**：若用户开启“敏感内容自动清理”，后台启动一个定时器，在检测到敏感复制行为 3 分钟后，若剪切板内容未改变，自动清空剪切板。
 
 #### 2.1.4 数据 management 与安全加密 (Database & Security)
-*   **文件型 JSON 数据库**：在 Windows `AppData/Roaming/yzai-desk` 目录下维护原子写入的 `data.json`。
+*   **文件型 JSON 数据库**：默认在软件安装目录的 `data` 文件夹维护原子写入的 `data.json`；用户可以选择其他可写的绝对目录。应用使用 `%APPDATA%/yzai-desk/storage-location.json` 保存自定义目录指针，以便重启后继续定位数据。
+*   **分类数据目录**：数据根目录包含 `backups`、`notes`、`ai-chats`，分别保存完整 JSON 备份、备忘录文本导出和不含 API Key 的 AI 对话归档。
+*   **安全迁移**：切换存储目录时先验证写入权限，备份目标目录已有数据，再复制当前数据并创建迁移快照；不自动删除原目录。
 *   **加密便签机制 (AES-256-GCM)**：在 React 前端利用原生 **Web Crypto API** 进行加解密，密钥从主密码通过 `PBKDF2` 派生，完全本地化，安全隔离。
 
 #### 2.1.5 任务调度与日程提醒 (Alarm Engine)
