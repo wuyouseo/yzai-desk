@@ -26,6 +26,7 @@ export const DEFAULT_DATA = {
     },
   ],
   clipboard: [],
+  quadrant_tasks: [],
   pomo_stats: {},
   pomo_minutes: {},
   pomo_state: null,
@@ -122,7 +123,7 @@ const normalizeNotes = (notes) => notes
     return {
       ...note,
       id: String(note.id || `legacy-note-${index + 1}`),
-      title: String(note.title || "未命名便签"),
+      title: String(note.title || "未命名备忘录"),
       content: typeof note.content === "string" ? note.content : "",
       category: String(note.category || "随记"),
       updated_at: Number.isNaN(updatedAt.getTime()) ? new Date(0).toISOString() : updatedAt.toISOString(),
@@ -133,6 +134,24 @@ const normalizeNotes = (notes) => notes
       iv: typeof note.iv === "string" ? note.iv : "",
     };
   });
+
+const QUADRANT_IDS = [
+  "urgent-important",
+  "important-not-urgent",
+  "urgent-not-important",
+  "not-urgent-not-important",
+];
+
+const normalizeQuadrantTasks = (tasks) => (
+  Array.isArray(tasks) ? tasks : []
+).filter((task) => task && typeof task === "object" && !Array.isArray(task) && String(task.title || "").trim()).map((task, index) => ({
+  id: String(task.id || `quadrant-task-${index + 1}`),
+  title: String(task.title).trim().slice(0, 120),
+  quadrant: QUADRANT_IDS.includes(task.quadrant) ? task.quadrant : "important-not-urgent",
+  done: Boolean(task.done),
+  created_at: task.created_at || new Date().toISOString(),
+  updated_at: task.updated_at || task.created_at || new Date().toISOString(),
+}));
 
 const normalizeAIConversations = (conversations) => (
   Array.isArray(conversations) ? conversations : []
@@ -173,6 +192,7 @@ const mergeData = (raw = {}) => {
     events: normalizeEvents(Array.isArray(raw.events) ? raw.events : DEFAULT_DATA.events),
     notes: normalizeNotes(Array.isArray(raw.notes) ? raw.notes : DEFAULT_DATA.notes),
     clipboard: Array.isArray(raw.clipboard) ? raw.clipboard : [],
+    quadrant_tasks: normalizeQuadrantTasks(raw.quadrant_tasks),
     pomo_stats: raw.pomo_stats || {},
     pomo_minutes: raw.pomo_minutes || {},
     pomo_state: raw.pomo_state || null,
@@ -336,7 +356,7 @@ export async function decryptNote(note, password) {
     );
     return new TextDecoder().decode(plaintext);
   } catch {
-    throw new Error("密码不正确，无法解锁这条便签");
+    throw new Error("密码不正确，无法解锁这条备忘录");
   }
 }
 

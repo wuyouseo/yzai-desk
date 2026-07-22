@@ -1,29 +1,71 @@
 import { useEffect, useState } from "react";
-import { BellRing, Check, Clock3, Flame } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { BellRing, Check, Clock3 } from "lucide-react";
 import { callCommand, isTauri, subscribe } from "../lib/deskApi";
 
 function NotificationView() {
   const [notice, setNotice] = useState({ type: "event", message: "该准备下一项安排了" });
   const [visible, setVisible] = useState(true);
+  const [closing, setClosing] = useState(false);
+
   useEffect(() => {
-    const off = subscribe("trigger-alarm", (payload) => { setNotice(payload); setVisible(true); });
+    const off = subscribe("trigger-alarm", (payload) => {
+      setNotice(payload);
+      setClosing(false);
+      setVisible(true);
+    });
     return () => { off.then((cleanup) => cleanup()); };
   }, []);
+
   const close = async () => {
-    setVisible(false);
-    if (isTauri()) await getCurrentWindow().hide().catch(() => {});
+    if (closing) return;
+    setClosing(true);
+    try {
+      if (isTauri()) await callCommand("hide_notification");
+      setVisible(false);
+    } catch (error) {
+      console.error("隐藏提醒窗口失败", error);
+      setClosing(false);
+    }
   };
+
   const snooze = async () => {
-    await callCommand("snooze_notification", {
-      notifType: notice.type,
-      message: notice.message,
-      minutes: 5,
-    });
-    await close();
+    if (closing) return;
+    setClosing(true);
+    try {
+      await callCommand("snooze_notification", {
+        notifType: notice.type,
+        message: notice.message,
+        minutes: 5,
+      });
+      if (isTauri()) await callCommand("hide_notification");
+      setVisible(false);
+    } catch (error) {
+      console.error("稍后提醒设置失败", error);
+      setClosing(false);
+    }
   };
+
   if (!visible) return null;
-  return <main className="notification-root"><span className={`notice-icon ${notice.type === "pomo" ? "pomo" : ""}`}>{notice.type === "pomo" ? <Flame /> : <BellRing />}</span><div><small>{notice.type === "pomo" ? "专注完成" : notice.type === "reminder" ? "提醒事项" : "日程提醒"}</small><strong>{notice.message}</strong><p>现在处理，还是稍后提醒？</p></div><section><button onClick={snooze}><Clock3 />5 分钟后</button><button className="dismiss" onClick={close}><Check />知道了</button></section></main>;
+
+  const isPomo = notice.type === "pomo";
+  const title = isPomo ? "番茄时间完成" : notice.type === "reminder" ? "提醒事项" : "日程提醒";
+
+  return (
+    <main className="notification-root" role="alertdialog" aria-label={title}>
+      <span className={`notice-icon ${isPomo ? "pomo" : ""}`} aria-hidden="true">
+        {isPomo ? <span className="tomato-icon">🍅</span> : <BellRing />}
+      </span>
+      <div className="notice-content">
+        <small>{title}</small>
+        <strong title={notice.message}>{notice.message}</strong>
+        <p>现在处理，还是稍后提醒？</p>
+      </div>
+      <section>
+        <button type="button" onClick={snooze} disabled={closing}><Clock3 />5 分钟后</button>
+        <button type="button" className="dismiss" onClick={close} disabled={closing}><Check />知道了</button>
+      </section>
+    </main>
+  );
 }
 
 export default NotificationView;

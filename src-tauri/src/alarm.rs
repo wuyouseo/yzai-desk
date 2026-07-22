@@ -238,10 +238,19 @@ fn show_notification(app_handle: &AppHandle, notif_type: &str, message: &str) {
             "message": message
         }));
         
-        // Show and focus the notification popup window
+        // Re-center every time so a previously moved or hidden popup never reappears at (0, 0).
+        let _ = notif_win.center();
         let _ = notif_win.show();
         let _ = notif_win.set_focus();
     }
+}
+
+#[tauri::command]
+pub fn hide_notification(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("notification")
+        .ok_or_else(|| "提醒窗口不存在".to_string())?;
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
