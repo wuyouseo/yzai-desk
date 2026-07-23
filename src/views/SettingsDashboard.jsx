@@ -47,6 +47,7 @@ import {
   ShieldCheck,
   Sparkles,
   StickyNote,
+  Timer,
   Trash2,
   Upload,
   X,
@@ -69,6 +70,7 @@ import {
   verifyNotePassword,
 } from "../lib/deskApi";
 import { lookupWeatherLocation, verifyWeatherLocation } from "../lib/weatherApi";
+import brandLogo from "../../logo-1.png";
 
 const NAV = [
   ["overview", "今日总览", LayoutDashboard],
@@ -76,12 +78,12 @@ const NAV = [
   ["quadrants", "四象限", Grid2X2],
   ["notes", "备忘录", NotebookPen],
   ["clipboard", "剪贴板", Clipboard],
-  ["focus", "番茄时间", Flame],
+  ["focus", "番茄时间", Timer],
   ["assistant", "AI 助手", MessageCircleMore],
   ["settings", "系统设置", Settings],
 ];
 
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.6.1";
 
 const SETTINGS_NAV = [
   ["general", "常规", Settings],
@@ -119,7 +121,7 @@ const FALLBACK_SYSTEM_FONTS = ["Segoe UI Variable", "Segoe UI", "Microsoft YaHei
 const MINI_WIDGETS = [
   { id: "calendar", name: "桌面日历", description: "月份、日期和日程标记", icon: CalendarDays },
   { id: "note", name: "桌面备忘录", description: "随手记录并自动保存", icon: NotebookPen },
-  { id: "focus", name: "番茄时间", description: "独立专注计时与控制", icon: Flame },
+  { id: "focus", name: "番茄时间", description: "独立专注计时与控制", icon: Timer },
   { id: "weather", name: "天气挂件", description: "温度、体感和实时风速", icon: CloudSun },
 ];
 
@@ -298,7 +300,7 @@ function SettingsDashboard() {
   return (
     <div className="desk-shell">
       <aside className="sidebar">
-        <div className="brand"><span className="brand-mark"><Sparkles size={18} /></span><span><strong>咏智桌面</strong><small>YZAI DESK</small></span></div>
+        <div className="brand"><span className="brand-mark brand-mark-logo"><img src={brandLogo} alt="" /></span><span><strong>咏智桌面</strong><small>YZAI DESK</small></span></div>
         <nav>
           {NAV.map(([key, label, Icon]) => (
             <button key={key} className={active === key ? "active" : ""} onClick={() => setActive(key)}>
@@ -1252,13 +1254,13 @@ function SettingsPage({ data, commit, importRef, flash }) {
         </SettingsCard>
       </div>}
 
-      {section === "about" && <div className="settings-stack">
-        <section className="panel about-hero"><span className="brand-mark"><Sparkles /></span><div><small>YZAI DESK</small><h2>咏智桌面工具</h2><p>把日程、速记、剪贴板与 AI 助手留在一个轻量桌面工作台里。</p></div><span className="version-pill">v{APP_VERSION}</span></section>
+      {section === "about" && <div className="settings-stack about-stack">
+        <section className="panel about-hero"><span className="brand-mark brand-mark-logo"><img src={brandLogo} alt="" /></span><div><small>YZAI DESK</small><h2>咏智桌面工具</h2><p>把日程、速记、剪贴板与 AI 助手留在一个轻量桌面工作台里。</p></div><span className="version-pill">v{APP_VERSION}</span></section>
         <SettingsCard title="版本信息" description="当前应用与运行环境。">
           <div className="about-list"><div><span>应用版本</span><strong>{APP_VERSION} 测试版</strong></div><div><span>桌面框架</span><strong>Tauri 2 + React 19</strong></div><div><span>数据位置</span><strong>安装目录 / 用户自定义</strong></div><div><span>更新方式</span><strong>当前为手动更新</strong></div></div>
         </SettingsCard>
         <SettingsCard title="开发信息" description="咏智桌面工具的开发与维护团队。">
-          <div className="developer-info"><span className="brand-mark"><Sparkles /></span><div><small>开发作者</small><strong>无忧AI</strong></div><div><small>开发团队</small><strong>咏智AI团队</strong></div><div className="developer-links"><button className="ghost-button" onClick={openWebsite}><ExternalLink />yzai.eu.cc</button><button className="ghost-button" onClick={openRepository}><ExternalLink />GitHub · wuyouseo/yzai-desk</button></div></div>
+          <div className="developer-info"><span className="brand-mark brand-mark-logo"><img src={brandLogo} alt="" /></span><div><small>开发作者</small><strong>无忧AI</strong></div><div><small>开发团队</small><strong>咏智AI团队</strong></div><div className="developer-links"><button className="ghost-button" onClick={openWebsite}><ExternalLink />yzai.eu.cc</button><button className="ghost-button" onClick={openRepository}><ExternalLink />GitHub · wuyouseo/yzai-desk</button></div></div>
         </SettingsCard>
         <SettingsCard title="系统占用状态" description="显示当前咏智桌面进程的实时内存工作集，每 5 秒刷新。">
           <div className="memory-status"><span><MemoryStick /></span><div><small>当前应用内存</small><strong>{memoryMb ? `${memoryMb.toFixed(1)} MB` : "正在读取…"}</strong><em className={memoryMb >= 400 ? "high" : memoryMb >= 200 ? "medium" : ""}>{memoryMb ? memoryLevel : "桌面端实时统计"}</em></div><div className="memory-meter"><i style={{ width: `${memoryPercent}%` }} /></div></div>

@@ -96,7 +96,7 @@ fn default_db() -> serde_json::Value {
         "ai_conversations": [],
         "settings": {
             "autostart": false,
-            "theme": "obsidian",
+            "theme": "cloud",
             "system_font": "system",
             "font_size": 100,
             "opacity": 85,
