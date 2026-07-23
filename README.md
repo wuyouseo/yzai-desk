@@ -1,198 +1,170 @@
-# 咏智桌面工具（YZai Desk）
+<div align="center">
+  <img src="./logo-rounded-square.png" width="104" alt="咏智桌面工具 Logo">
+  <h1>咏智桌面工具（YZai Desk）</h1>
+  <p>把日程、四象限、备忘录、专注计时、剪贴板和 AI 助手放进一个轻量的 Windows 桌面工作台。</p>
+  <p>
+    <strong>当前版本：V0.6.1</strong>
+    · Windows 10 / 11
+    · 本地优先
+    · Tauri + React
+  </p>
+</div>
 
-咏智桌面工具是一款面向 Windows 的本地桌面效率应用，将日程、提醒、备忘录、剪贴板、番茄钟、天气、AI 助手和桌面挂件集中到一个轻量工作台中。
+## 项目简介
 
-当前版本：**v0.6.0 测试版**
+咏智桌面工具是一款面向个人效率场景的 Windows 桌面应用。主要数据默认保存在本机，常用功能可从主窗口、系统托盘和桌面挂件快速访问。
 
-- 开发作者：无忧AI
-- 开发团队：咏智AI团队
-- 官方网站：[yzai.eu.cc](https://yzai.eu.cc)
-- GitHub：[wuyouseo/yzai-desk](https://github.com/wuyouseo/yzai-desk)
-- 技术框架：Tauri 2、React 19、Vite 7、Rust
+V0.6.1 完成了品牌图标统一、云雾白默认主题、备忘录浅色可读性优化、关于页面调整，以及安装后桌面快捷方式图标刷新。桌面配置窗口标题显示为“咏智桌面工具 V0.6.1”。
 
-## 主要功能
+## 界面预览
 
 ### 今日总览
 
-- 集中显示今日日程、剪贴板记录和专注数据。
-- 快速查看待处理事项和当天工作状态。
-- 支持曜石紫、午夜蓝、极光绿和云雾白四套主题。
+![今日总览](./docs/screenshots/overview.png)
 
-### 日程、提醒与备忘
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="./docs/screenshots/schedule-reminders.png" alt="日期提醒"><br>
+      <strong>日期提醒</strong>
+    </td>
+    <td align="center" width="50%">
+      <img src="./docs/screenshots/four-quadrants.png" alt="四象限任务"><br>
+      <strong>四象限任务</strong>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./docs/screenshots/notes.png" alt="备忘录"><br>
+      <strong>备忘录</strong>
+    </td>
+    <td align="center">
+      <img src="./docs/screenshots/focus-timer.png" alt="番茄时间"><br>
+      <strong>番茄时间</strong>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./docs/screenshots/ai-assistant.png" alt="AI 助手"><br>
+      <strong>AI 助手</strong>
+    </td>
+    <td align="center">
+      <img src="./docs/screenshots/appearance-themes.png" alt="主题外观"><br>
+      <strong>主题外观</strong>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="./docs/screenshots/widget-settings.png" alt="桌面挂件设置"><br>
+      <strong>桌面挂件设置</strong>
+    </td>
+    <td align="center">
+      <img src="./docs/screenshots/desktop-widgets.png" alt="桌面挂件"><br>
+      <strong>桌面挂件</strong>
+    </td>
+  </tr>
+</table>
 
-- 月历展示日程、提醒和备忘三种事项。
-- 支持新建、编辑、完成、删除和重复规则。
-- 日历顶部显示提醒、备忘、未完成和已完成数量。
-- 提醒到点后弹出独立通知窗口，并支持五分钟后再次提醒。
-- 桌面日历挂件支持快速返回今日和事项标记。
+## 核心能力
 
-### 四象限
-
-- 左侧导航提供独立“四象限”入口。
-- 按重要性与紧急程度分为重要且紧急、重要不紧急、紧急不重要、不紧急不重要四个区域。
-- 每个象限都可直接添加事项，并支持完成、恢复、移动象限和删除。
-- 支持查看待处理、全部和已完成事项，数据随本地备份一起保存。
-
-### 备忘录
-
-- 支持创建多个备忘录、搜索、置顶、删除和分类。
-- 支持加粗、斜体、有序列表和无序列表等常用格式。
-- 支持导入 `.txt`、`.md` 文件以及导出当前备忘录。
-- 标题采用本地草稿并在失焦或按回车时保存，连续输入不会被异步写盘覆盖。
-- 支持统一锁定密码和 AES-256-GCM 加密。
-- 正文采用本地草稿与失焦保存，减少输入卡顿和异步覆盖。
-
-### 剪贴板
-
-- 自动监听、去重、搜索、复制、置顶和删除文本记录。
-- 记录过多时使用独立滚动区域。
-- 一键清理只删除未置顶记录，置顶内容受到保护。
-- 敏感内容可在三分钟后自动清理。
-
-### 番茄钟与专注统计
-
-- 支持开始、暂停、继续和重置专注会话。
-- 应用重启后可恢复剩余时间。
-- 统计最近七天的完成次数和实际专注分钟数。
-
-### AI 助手
-
-- 支持新建对话、历史对话切换和删除。
-- 对话标题、消息和附件保存在本地数据中。
-- AI 回答支持 Markdown、表格、列表、引用和代码块排版。
-- 每条 AI 回答下方可单独复制或保存为 Markdown，文件自动写入当前数据目录的 `ai-chats` 文件夹。
-- 支持 OpenAI Chat Completions 与 Anthropic Messages 兼容协议。
-- 可添加多个自定义 AI 服务，填写服务名称、Base URL、模型 ID 和 API Key。
-- 支持图片、PDF、文本和常见代码附件。
-- 单次最多上传 5 个附件，单文件不超过 10 MB，总大小不超过 20 MB。
-
-### 桌面挂件
-
-- 提供日历、备忘录、番茄钟和天气四个独立桌面挂件。
-- 桌面备忘录支持新建、切换、修改标题和正文，并与配置中心实时同步。
-- 每个挂件可自由拖动和缩放，并保存位置、尺寸及显示状态。
-- 四个独立挂件支持不透明度、背景模糊和兼容模式。
-- 可从“系统设置 → 桌面挂件”添加，也可通过 Windows 桌面右键菜单快捷添加。
-- 系统托盘只保留配置中心和退出等必要入口；挂件从设置页或桌面右键菜单管理。
-
-### 系统设置
-
-- 二级菜单包含常规、外观与主题、桌面挂件、AI 服务、数据与备份和关于。
-- 可设置系统字体、界面字号、主题、开机启动和隐私清理。
-- 顶部标题和二级菜单固定，右侧详情独立滚动并适配不同窗口尺寸。
-- 关于页显示作者、团队、官网、GitHub 仓库、程序版本和实时内存工作集。
-- 支持导入与导出完整 JSON 数据备份。
-
-## 窗口与快捷入口
-
-| 功能 | 入口或操作 |
+| 模块 | 能力 |
 | --- | --- |
-| 配置中心 | 启动应用或点击托盘图标 |
-| 快捷 AI 助手 | `Alt + Space` |
-| 独立挂件 | 系统设置或 Windows 桌面右键菜单 |
-| 挂件拖动 | 拖动挂件顶部标题栏 |
-| 挂件隐藏 | 点击当前挂件的关闭按钮 |
-| 通知稍后提醒 | 在通知窗口选择“五分钟后” |
+| 今日总览 | 汇总待办、提醒、专注数据和常用入口 |
+| 日期提醒 | 日历浏览、事件记录、到期提醒 |
+| 四象限 | 按重要性与紧急程度组织任务 |
+| 备忘录 | 本地富文本记录、自动保存、浅色与深色主题适配 |
+| 剪贴板 | 保存常用文本并快速复制 |
+| 番茄时间 | 工作与休息计时、桌面挂件、完成提醒 |
+| AI 助手 | 自定义兼容接口、流式回答、会话记录、Markdown 导出 |
+| 桌面挂件 | 时钟、日历、任务和专注计时，可独立显示与定位 |
+| 系统设置 | 云雾白等主题、开机启动、快捷键、数据目录、备份与恢复 |
 
-Windows 11 的传统桌面右键菜单可能需要先点击“显示更多选项”。
+## 快速开始
 
-## 数据与隐私
+### 环境要求
 
-- 核心数据默认保存在软件安装目录下的 `data\data.json`，也可以在“系统设置 → 数据与备份”中选择其他本地目录。
-- 当前数据目录会自动创建 `backups`、`notes` 和 `ai-chats`，分别保存完整备份、备忘录文本导出与 AI 对话归档。
-- 首次升级会把旧版 `%APPDATA%\yzai-desk\data.json` 安全复制到默认数据目录；更换目录时保留原文件并在目标目录创建迁移备份。
-- 数据包括日程、四象限事项、备忘录、剪贴板、专注统计、AI 历史会话和系统设置。
-- 备忘录统一密码的明文不会写入本地文件，只在当前运行会话内存中短暂缓存。
-- 自定义 AI 服务的 API Key 当前随本地设置和 JSON 备份保存，请只在受信任的电脑上使用。
-- 除天气服务和用户主动配置的 AI 服务外，应用不会主动发送本地数据到其他服务器。
-- 删除或覆盖数据前建议先在“系统设置 → 数据与备份”点击“立即备份”。
+- Windows 10 / 11 x64
+- Node.js 20 或更高版本
+- 开发桌面端时需要 Rust 与项目对应的 Tauri 工具链
 
-## 运行要求
-
-- Windows 10 或 Windows 11。
-- Node.js 20 或更高版本。
-- npm。
-- Microsoft Edge WebView2 Runtime。
-- 桌面编译需要 Rust stable `x86_64-pc-windows-gnu` 与 LLVM-MinGW。
-
-当前仓库的桌面脚本优先使用项目目录中的 `.toolchains` 工具链。源码备份不会包含该目录，恢复到新电脑后需要重新准备工具链。
-
-## 安装前端依赖
+### 安装依赖
 
 ```powershell
 npm.cmd install
 ```
 
-## 浏览器预览
+### 浏览器模式
 
 ```powershell
 npm.cmd run dev
 ```
 
-默认访问地址为 `http://localhost:1420`。浏览器预览使用 `localStorage` 代替 Tauri 本地数据库，适合检查界面和基础交互；桌面挂件、系统托盘、全局快捷键和 Windows 集成功能需要在 Tauri 开发版中测试。
+浏览器模式适合调试界面。系统托盘、开机启动、全局快捷键、桌面挂件和原生通知等功能需要在桌面模式验证。
 
-## 运行桌面开发版
-
-项目工具链准备完成后运行：
+### 桌面开发模式
 
 ```powershell
 npm.cmd run desktop:dev
 ```
 
-## 常用开发命令
+### 常用命令
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm.cmd run dev` | 启动 Vite 浏览器预览 |
-| `npm.cmd run build` | 构建前端生产资源 |
-| `npm.cmd run desktop:check` | 检查 Rust 桌面代码 |
-| `npm.cmd run desktop:compile` | 编译桌面开发程序 |
-| `npm.cmd run desktop:dev` | 启动完整桌面开发版 |
-| `npm.cmd run desktop:build` | 构建桌面发布程序或安装器 |
+| `npm.cmd run dev` | 启动 Vite 浏览器开发环境 |
+| `npm.cmd run build` | 构建前端资源 |
+| `npm.cmd run desktop:check` | 检查 Rust / Tauri 桌面端 |
+| `npm.cmd run desktop:dev` | 启动桌面开发模式 |
+| `npm.cmd run desktop:build` | 生成 Windows 安装包 |
 
-v0.6.0 Windows x64 NSIS 安装器生成在 `release` 目录。该版本为桌面备忘录恢复轻量“+”新建按钮，支持在每条 AI 回答下方单独保存 Markdown，并修复本地存储位置编辑、目录浏览、保存和打开文件夹功能；存储界面同时移除四项冗余目录展示。当前安装器尚未进行商业代码签名，仍需在更多硬件和驱动版本上继续回归测试。
+## Windows 安装包
+
+当前本地构建文件：
+
+`release/YZai-Desk-v0.6.1-Windows-x64-Setup.exe`
+
+正式发布包请从项目的 [GitHub Releases](https://github.com/wuyouseo/yzai-desk/releases) 页面下载。
+
+| 项目 | 值 |
+| --- | --- |
+| 版本 | `0.6.1` |
+| 文件大小 | `6,265,773` 字节 |
+| SHA-256 | `CE2F5B81CEE4F95706DECA86ED3BC89386F7589937C1BD792C4B1B967A6461F6` |
+
+安装包内容已检查，包含主程序、`WebView2Loader.dll` 和版本化桌面快捷方式图标。正式安装、卸载、覆盖升级及多台电脑兼容性仍需在发布前完成实机回归。
+
+## 数据与隐私
+
+- 日程、任务、备忘录、剪贴板、专注记录和设置默认保存在本机。
+- 支持修改数据目录，以及导出、导入本地备份。
+- AI 助手仅在用户主动配置接口后请求对应服务。
+- API 密钥按本地配置机制保存；请勿提交个人配置、密钥或备份数据。
 
 ## 项目结构
 
 ```text
 desk-tool/
-├─ src/                         React 前端与各窗口界面
-│  ├─ views/                   配置中心、挂件、通知和快捷助手
-│  └─ lib/deskApi.js           本地数据、加密与 AI 协议适配
-├─ src-tauri/                  Tauri 与 Rust 桌面后端
-│  ├─ src/                     数据、剪贴板、提醒、窗口和系统服务
-│  ├─ capabilities/            Tauri 权限配置
-│  └─ tauri.conf.json          窗口、版本和构建配置
-├─ scripts/                    Windows 开发与编译脚本
-├─ docs/                       需求、架构、进度和实施计划
-├─ package.json                前端依赖与命令
-└─ README.md                   项目功能和使用说明
+├─ src/                    # React 前端与业务界面
+├─ src-tauri/              # Tauri / Rust 桌面能力与打包配置
+├─ docs/
+│  ├─ screenshots/         # README 实机截图
+│  ├─ development_progress.md
+│  └─ implementation_plan.md
+├─ release/                # 本地发布安装包
+├─ logo-1.png              # 原始品牌图
+├─ logo-rounded-square.png # 圆角方形应用图标
+└─ README.md
 ```
 
-## 源码备份说明
+## 开发与发布文档
 
-源码备份应包含 `src`、`src-tauri`、`scripts`、`docs`、图标、配置文件和依赖锁文件。为控制体积，通常不包含以下可重新生成或体积较大的目录：
+- [开发清单与验证记录](./docs/development_progress.md)
+- [实施方案](./docs/implementation_plan.md)
 
-- `node_modules`
-- `dist`
-- `src-tauri/target`
-- `.toolchains`
-- `.git`
-- `backups`
+## 当前边界
 
-恢复源码备份后，先运行 `npm.cmd install`，再根据本机环境准备 Rust 与 LLVM-MinGW 工具链。
+项目目前处于内部测试阶段，尚未配置 Windows 代码签名和自动更新。发布前需要补齐真实安装、卸载、覆盖升级、多显示器、高 DPI 和不同 Windows 环境的回归测试。
 
-## 当前版本边界
+## 版权
 
-- 当前为 v0.6.0 内部测试版，不建议直接作为正式发布版本分发。
-- NSIS 安装器已经生成；自动更新、代码签名和正式隐私协议尚未完成。
-- AI 服务需要用户自行提供兼容接口和 API Key。
-- 通知音效、完整自动化测试和多显示器边界测试仍在继续完善。
-
-## 开发文档
-
-- [需求与架构设计](./docs/requirements_and_architecture.md)
-- [开发进度](./docs/development_progress.md)
-- [开发记录与实施计划](./docs/implementation_plan.md)
-
-Copyright © 2026 无忧AI / 咏智AI团队。
+© 2026 咏智桌面工具（YZai Desk）

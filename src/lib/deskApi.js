@@ -33,7 +33,7 @@ export const DEFAULT_DATA = {
   ai_conversations: [],
   settings: {
     autostart: false,
-    theme: "obsidian",
+    theme: "cloud",
     system_font: "system",
     font_size: 100,
     opacity: 88,
@@ -74,7 +74,7 @@ export function applyAppearance(settings = {}) {
   const root = document.documentElement;
   const selectedFont = String(settings.system_font || "system").replace(/["\\]/g, "").trim();
   const fontSize = Math.min(125, Math.max(85, Number(settings.font_size) || 100));
-  root.dataset.theme = settings.theme || "obsidian";
+  root.dataset.theme = settings.theme || "cloud";
   root.style.setProperty(
     "--app-font-family",
     selectedFont === "system"

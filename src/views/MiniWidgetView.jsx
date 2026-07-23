@@ -56,7 +56,7 @@ function MiniWidgetView({ kind }) {
     loadData().then(async (loaded) => {
       if (cancelled) return;
       setData(loaded);
-      document.documentElement.dataset.theme = loaded.settings.theme || "obsidian";
+      document.documentElement.dataset.theme = loaded.settings.theme || "cloud";
       const quickNote = findDesktopNote(loaded.notes);
       loadDesktopNote(quickNote);
 
