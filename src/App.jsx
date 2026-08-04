@@ -17,9 +17,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    loadData().then((data) => applyAppearance(data.settings));
-    const off = subscribe("settings-changed", (settings) => applyAppearance(settings));
-    return () => { off.then((cleanup) => cleanup()); };
+    let currentSettings = null;
+    let resizeFrame = 0;
+    const syncAppearance = (settings) => {
+      currentSettings = settings;
+      applyAppearance(settings);
+    };
+    loadData().then((data) => syncAppearance(data.settings));
+    const off = subscribe("settings-changed", syncAppearance);
+    const handleResize = () => {
+      window.cancelAnimationFrame(resizeFrame);
+      resizeFrame = window.requestAnimationFrame(() => {
+        if (currentSettings) applyAppearance(currentSettings);
+      });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.cancelAnimationFrame(resizeFrame);
+      off.then((cleanup) => cleanup());
+    };
   }, []);
 
   if (route.startsWith("mini-widget/")) return <MiniWidgetView kind={route.split("/")[1]} />;

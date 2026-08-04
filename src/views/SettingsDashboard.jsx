@@ -54,6 +54,7 @@ import {
 } from "lucide-react";
 import {
   applyAppearance,
+  AI_PROVIDER_PRESETS,
   askAI,
   callCommand,
   createNotePasswordConfig,
@@ -83,7 +84,7 @@ const NAV = [
   ["settings", "系统设置", Settings],
 ];
 
-const APP_VERSION = "0.6.1";
+const APP_VERSION = "0.6.6";
 
 const SETTINGS_NAV = [
   ["general", "常规", Settings],
@@ -303,8 +304,15 @@ function SettingsDashboard() {
         <div className="brand"><span className="brand-mark brand-mark-logo"><img src={brandLogo} alt="" /></span><span><strong>咏智桌面</strong><small>YZAI DESK</small></span></div>
         <nav>
           {NAV.map(([key, label, Icon]) => (
-            <button key={key} className={active === key ? "active" : ""} onClick={() => setActive(key)}>
-              <Icon size={18} /><span>{label}</span>
+            <button
+              key={key}
+              className={active === key ? "active" : ""}
+              aria-current={active === key ? "page" : undefined}
+              title={label}
+              onClick={() => setActive(key)}
+            >
+              <Icon size={19} strokeWidth={active === key ? 2.4 : 2.15} aria-hidden="true" />
+              <span>{label}</span>
             </button>
           ))}
         </nav>
@@ -314,7 +322,8 @@ function SettingsDashboard() {
 
       <main className={`dashboard dashboard-${active}`}>
         <header className="topbar">
-          <div><p>{new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}</p><h1>{NAV.find(([key]) => key === active)?.[1]}</h1></div>
+          <h1>{NAV.find(([key]) => key === active)?.[1]}</h1>
+          <p>{new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}</p>
         </header>
 
         <div className={`page-content page-${active}`}>
@@ -1338,7 +1347,7 @@ function AISettingsPanel({ settings, update, flash }) {
   useEffect(() => { if (selected) setDraft({ ...selected }); }, [selectedId, selected]);
 
   const addProvider = () => {
-    const provider = { id: uid(), name: `自定义服务 ${providers.length + 1}`, protocol: "openai", base_url: "", model_id: "", api_key: "" };
+    const provider = { id: uid(), name: `自定义服务 ${providers.length + 1}`, protocol: "openai", base_url: "", model_id: "", models: [], capability: "chat", description: "OpenAI 兼容自定义服务", docs_url: "", api_key: "" };
     setDraft(provider);
     setSelectedId(provider.id);
   };
@@ -1346,9 +1355,9 @@ function AISettingsPanel({ settings, update, flash }) {
     if (!draft.name.trim()) return flash("请填写服务名称");
     if (!draft.base_url.trim()) return flash("请填写 Base URL");
     if (!draft.model_id.trim()) return flash("请填写模型 ID");
-    const saved = { ...draft, base_url: draft.base_url.replace(/\/$/, "") };
+    const saved = { ...draft, base_url: draft.base_url.replace(/\/$/, ""), model_id: draft.model_id.trim() };
     const next = isNew ? [...providers, saved] : providers.map((provider) => provider.id === draft.id ? saved : provider);
-    await update({ ai_providers: next, active_ai_provider_id: settings.active_ai_provider_id || saved.id }, "AI 服务已保存");
+    await update({ ai_providers: next, active_ai_provider_id: saved.id }, `已保存并启用 ${saved.name}`);
     setSelectedId(saved.id);
   };
   const removeProvider = async () => {
@@ -1365,14 +1374,22 @@ function AISettingsPanel({ settings, update, flash }) {
     setSelectedId(activeId);
   };
   const activateProvider = () => update({ active_ai_provider_id: draft.id }, `已启用 ${draft.name}`);
+  const selectProvider = (id) => setSelectedId(id);
+  const selectModel = (model) => setDraft({ ...draft, model_id: model });
+  const openProviderDocs = () => {
+    if (!draft.docs_url) return;
+    if (window.__TAURI_INTERNALS__) openUrl(draft.docs_url);
+    else window.open(draft.docs_url, "_blank", "noopener,noreferrer");
+  };
 
   return <div className="ai-settings-layout">
-    <aside className="panel provider-list"><div className="provider-list-head"><div><span className="eyebrow">MODEL ENDPOINTS</span><h2>AI 服务</h2></div><button className="icon-button filled" onClick={addProvider} title="添加自定义服务"><Plus /></button></div><div>{displayedProviders.map((provider) => <button key={provider.id} className={provider.id === draft?.id ? "active" : ""} onClick={() => setSelectedId(provider.id)}><span className={`provider-icon ${provider.protocol}`}><Server /></span><div><strong>{provider.name}</strong><small>{provider.model_id || "未填写模型 ID"}</small></div>{provider.id === settings.active_ai_provider_id && <i>使用中</i>}</button>)}</div></aside>
-    {draft && <section className="panel provider-editor"><div className="settings-card-head"><div><span className="eyebrow">CONNECTION</span><h2>{draft.name}</h2><p>配置兼容的模型接口；Base URL 无需填写最后的具体请求路径。</p></div><span className={`connection-badge ${draft.api_key ? "online" : ""}`}>{draft.api_key ? "已配置" : "缺少 Key"}</span></div>
-      <div className="protocol-switch"><button className={draft.protocol === "openai" ? "active" : ""} onClick={() => setDraft({ ...draft, protocol: "openai" })}><strong>OpenAI 兼容</strong><span>/v1/chat/completions</span></button><button className={draft.protocol === "anthropic" ? "active" : ""} onClick={() => setDraft({ ...draft, protocol: "anthropic" })}><strong>Anthropic</strong><span>/v1/messages</span></button></div>
-      <div className="provider-form"><label><span>服务名称</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：公司模型网关" /></label><label><span>协议类型</span><select value={draft.protocol} onChange={(event) => setDraft({ ...draft, protocol: event.target.value })}><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label><label className="full"><span>Base URL</span><input value={draft.base_url} onChange={(event) => setDraft({ ...draft, base_url: event.target.value })} placeholder={draft.protocol === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com"} /></label><label><span>模型 ID</span><input value={draft.model_id} onChange={(event) => setDraft({ ...draft, model_id: event.target.value })} placeholder={draft.protocol === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini"} /></label><label><span>API Key</span><input type="password" value={draft.api_key} onChange={(event) => setDraft({ ...draft, api_key: event.target.value })} placeholder="输入服务密钥" /></label></div>
-      <div className="provider-tip"><ShieldCheck /><p>密钥保存在当前电脑的本地设置中。自定义服务需要允许桌面 WebView 发起跨域请求。</p></div>
-      <div className="provider-actions"><button className={`ghost-button ${isNew ? "" : "danger"}`} onClick={removeProvider}><Trash2 size={15} />{isNew ? "取消添加" : "删除服务"}</button><span /><button className="ghost-button" disabled={isNew || draft.id === settings.active_ai_provider_id} onClick={activateProvider}>{draft.id === settings.active_ai_provider_id ? "当前使用中" : "设为当前服务"}</button><button className="primary-button" onClick={saveProvider}>保存配置</button></div>
+    <aside className="panel provider-list"><div className="provider-list-head"><div><span className="eyebrow">MODEL ENDPOINTS</span><h2>AI 服务</h2><p>选服务，填 Key，即可使用</p></div><button className="icon-button filled" onClick={addProvider} title="添加 OpenAI 或 Anthropic 兼容服务"><Plus /></button></div><div>{displayedProviders.map((provider) => <button key={provider.id} className={provider.id === draft?.id ? "active" : ""} onClick={() => selectProvider(provider.id)}><span className={`provider-icon ${provider.protocol}`}><Server /></span><div><strong>{provider.name}</strong><small>{provider.model_id || "未填写模型 ID"}</small></div>{provider.id === settings.active_ai_provider_id && <i>使用中</i>}</button>)}</div></aside>
+    {draft && <section className="panel provider-editor"><div className="settings-card-head"><div><span className="eyebrow">TEXT ASSISTANT</span><h2>{draft.name}</h2><p>{draft.description || "配置兼容的模型接口；Base URL 无需填写最后的具体请求路径。"}</p></div><span className={`connection-badge ${draft.api_key ? "online" : ""}`}>{draft.api_key ? "已配置" : "缺少 Key"}</span></div>
+      <div className="provider-quickstart"><Check size={16} /><span><strong>两步即可启用</strong><small>1. 填入 API Key　2. 点击“保存并启用”</small></span>{draft.docs_url && <button className="text-button" onClick={openProviderDocs}>查看官方文档 <ExternalLink size={13} /></button>}</div>
+      <div className="provider-form"><label><span>服务名称</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="例如：公司模型网关" /></label><label><span>协议类型</span><select value={draft.protocol} onChange={(event) => setDraft({ ...draft, protocol: event.target.value, capability: "chat" })}><option value="openai">OpenAI Chat Completions</option><option value="anthropic">Anthropic Messages</option></select></label><label className="full"><span>Base URL</span><input value={draft.base_url} onChange={(event) => setDraft({ ...draft, base_url: event.target.value })} placeholder={draft.protocol === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1"} /></label><label><span>模型 ID</span><input list="provider-models" value={draft.model_id} onChange={(event) => setDraft({ ...draft, model_id: event.target.value })} placeholder={draft.protocol === "anthropic" ? "claude-sonnet-4-5" : "gpt-4.1-mini"} /><datalist id="provider-models">{AI_PROVIDER_PRESETS.flatMap((provider) => provider.models).map((model) => <option key={model} value={model} />)}</datalist></label><label><span>API Key</span><input type="password" value={draft.api_key} onChange={(event) => setDraft({ ...draft, api_key: event.target.value })} placeholder="粘贴服务密钥；仅保存在本机" autoComplete="off" /></label></div>
+      {draft.models?.length > 0 && <div className="provider-models"><span>推荐模型</span><div>{draft.models.map((model) => <button key={model} className={draft.model_id === model ? "active" : ""} onClick={() => selectModel(model)}>{model}</button>)}</div></div>}
+      <div className="provider-tip"><ShieldCheck /><p>密钥仅保存在当前电脑的本地设置。自定义服务需支持对应的 OpenAI Chat Completions 或 Anthropic Messages 协议，并允许桌面 WebView 发起跨域请求。</p></div>
+      <div className="provider-actions"><button className={`ghost-button ${isNew ? "" : "danger"}`} onClick={removeProvider}><Trash2 size={15} />{isNew ? "取消添加" : "删除服务"}</button><span /><button className="ghost-button" disabled={isNew || draft.id === settings.active_ai_provider_id} onClick={activateProvider}>{draft.id === settings.active_ai_provider_id ? "当前使用中" : "设为当前服务"}</button><button className="primary-button" onClick={saveProvider}>保存并启用</button></div>
     </section>}
   </div>;
 }

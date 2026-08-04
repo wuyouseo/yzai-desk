@@ -15,7 +15,7 @@ Var RefreshDesktopShortcut
 !macro NSIS_HOOK_POSTINSTALL
   ${If} $RefreshDesktopShortcut = 1
     Delete "$DESKTOP\${PRODUCTNAME}.lnk"
-    CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\yzai-desktop-v061.ico" 0 SW_SHOWNORMAL "" "${PRODUCTNAME}"
+    CreateShortcut "$DESKTOP\${PRODUCTNAME}.lnk" "$INSTDIR\${MAINBINARYNAME}.exe" "" "$INSTDIR\yzai-desktop-v064.ico" 0 SW_SHOWNORMAL "" "${PRODUCTNAME}"
     !insertmacro SetLnkAppUserModelId "$DESKTOP\${PRODUCTNAME}.lnk"
   ${EndIf}
 !macroend

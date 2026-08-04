@@ -3,7 +3,7 @@
   <h1>咏智桌面工具（YZai Desk）</h1>
   <p>把日程、四象限、备忘录、专注计时、剪贴板和 AI 助手放进一个轻量的 Windows 桌面工作台。</p>
   <p>
-    <strong>当前版本：V0.6.1</strong>
+    <strong>当前版本：V0.6.6</strong>
     · Windows 10 / 11
     · 本地优先
     · Tauri + React
@@ -14,7 +14,7 @@
 
 咏智桌面工具是一款面向个人效率场景的 Windows 桌面应用。主要数据默认保存在本机，常用功能可从主窗口、系统托盘和桌面挂件快速访问。
 
-V0.6.1 完成了品牌图标统一、云雾白默认主题、备忘录浅色可读性优化、关于页面调整，以及安装后桌面快捷方式图标刷新。桌面配置窗口标题显示为“咏智桌面工具 V0.6.1”。
+V0.6.6 修正 Agnes AI 服务为 OpenAI 兼容的文本生成模型，预置 `agnes-2.5-flash`、`agnes-2.0-flash`、`agnes-2.5-pro`；移除重复的协议切换按钮，仅保留“协议类型”下拉选择。DeepSeek（OpenAI / Anthropic）、Kimi、OpenAI、Anthropic 与第三方兼容服务的配置方式保持不变。
 
 ## 界面预览
 
@@ -121,15 +121,15 @@ npm.cmd run desktop:dev
 
 当前本地构建文件：
 
-`release/YZai-Desk-v0.6.1-Windows-x64-Setup.exe`
+`release/YZai-Desk-v0.6.6-Windows-x64-Setup.exe`
 
 正式发布包请从项目的 [GitHub Releases](https://github.com/wuyouseo/yzai-desk/releases) 页面下载。
 
 | 项目 | 值 |
 | --- | --- |
-| 版本 | `0.6.1` |
-| 文件大小 | `6,265,773` 字节 |
-| SHA-256 | `CE2F5B81CEE4F95706DECA86ED3BC89386F7589937C1BD792C4B1B967A6461F6` |
+| 版本 | `0.6.6` |
+| 文件大小 | `6,271,777` 字节 |
+| SHA-256 | `C7F592570D8894407940C89B5B504BED05BEF18DA39FB866D8DCEFB9F4ABC954` |
 
 安装包内容已检查，包含主程序、`WebView2Loader.dll` 和版本化桌面快捷方式图标。正式安装、卸载、覆盖升级及多台电脑兼容性仍需在发布前完成实机回归。
 

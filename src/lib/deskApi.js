@@ -1,6 +1,97 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+export const AI_PROVIDER_CATALOG_VERSION = 3;
+
+export const AI_PROVIDER_PRESETS = [
+  {
+    id: "deepseek-openai",
+    name: "DeepSeek",
+    protocol: "openai",
+    base_url: "https://api.deepseek.com",
+    model_id: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    capability: "chat",
+    description: "OpenAI 兼容 · 国内直连",
+    docs_url: "https://api-docs.deepseek.com/",
+  },
+  {
+    id: "deepseek-anthropic",
+    name: "DeepSeek（Anthropic）",
+    protocol: "anthropic",
+    base_url: "https://api.deepseek.com/anthropic",
+    model_id: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+    capability: "chat",
+    description: "Anthropic Messages 兼容",
+    docs_url: "https://api-docs.deepseek.com/",
+  },
+  {
+    id: "kimi-default",
+    name: "Kimi",
+    protocol: "openai",
+    base_url: "https://api.moonshot.cn/v1",
+    model_id: "kimi-k3",
+    models: ["kimi-k3", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
+    capability: "chat",
+    description: "OpenAI 兼容 · 长上下文",
+    docs_url: "https://platform.kimi.com/docs/overview",
+  },
+  {
+    id: "openai-default",
+    name: "OpenAI",
+    protocol: "openai",
+    base_url: "https://api.openai.com/v1",
+    model_id: "gpt-4.1-mini",
+    models: ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
+    capability: "chat",
+    description: "Chat Completions 兼容",
+    docs_url: "https://platform.openai.com/docs/api-reference/chat",
+  },
+  {
+    id: "anthropic-default",
+    name: "Anthropic",
+    protocol: "anthropic",
+    base_url: "https://api.anthropic.com",
+    model_id: "claude-sonnet-4-5",
+    models: ["claude-sonnet-4-5", "claude-haiku-4-5"],
+    capability: "chat",
+    description: "Messages API 兼容",
+    docs_url: "https://docs.anthropic.com/en/api/messages",
+  },
+  {
+    id: "agnes-ai",
+    name: "Agnes AI",
+    protocol: "openai",
+    base_url: "https://apihub.agnes-ai.com/v1",
+    model_id: "agnes-2.5-flash",
+    models: ["agnes-2.5-flash", "agnes-2.0-flash", "agnes-2.5-pro"],
+    capability: "chat",
+    description: "OpenAI 兼容 · 文本生成",
+    docs_url: "https://agnes-ai.cn/zh-Hans/docs/agnes-25-flash",
+  },
+];
+
+const createPresetProvider = (preset) => ({ ...preset, api_key: "" });
+const findPreset = (provider) => AI_PROVIDER_PRESETS.find((preset) => preset.id === provider?.id);
+
+const normalizeProvider = (provider, index) => {
+  const source = provider && typeof provider === "object" ? provider : {};
+  const preset = findPreset(source);
+  return {
+    id: source.id || `provider-${index + 1}`,
+    name: source.name || preset?.name || `自定义服务 ${index + 1}`,
+    protocol: source.protocol === "anthropic" ? "anthropic" : "openai",
+    base_url: source.base_url || preset?.base_url || "",
+    model_id: source.model_id || preset?.model_id || "",
+    models: Array.isArray(source.models) ? source.models.filter(Boolean) : (preset?.models || []),
+    capability: "chat",
+    description: source.description || preset?.description || "自定义兼容服务",
+    docs_url: source.docs_url || preset?.docs_url || "",
+    api_key: source.api_key || "",
+  };
+};
+
 export const DEFAULT_DATA = {
   events: [
     {
@@ -45,17 +136,9 @@ export const DEFAULT_DATA = {
     ai_api_key: "",
     ai_base_url: "https://api.deepseek.com",
     ai_model: "deepseek-chat",
-    active_ai_provider_id: "deepseek-default",
-    ai_providers: [
-      {
-        id: "deepseek-default",
-        name: "DeepSeek",
-        protocol: "openai",
-        base_url: "https://api.deepseek.com",
-        model_id: "deepseek-chat",
-        api_key: "",
-      },
-    ],
+    ai_provider_catalog_version: AI_PROVIDER_CATALOG_VERSION,
+    active_ai_provider_id: "deepseek-openai",
+    ai_providers: AI_PROVIDER_PRESETS.map(createPresetProvider),
     pomo_duration: 25,
     sensitive_auto_clear: true,
     note_password_config: null,
@@ -74,35 +157,51 @@ export function applyAppearance(settings = {}) {
   const root = document.documentElement;
   const selectedFont = String(settings.system_font || "system").replace(/["\\]/g, "").trim();
   const fontSize = Math.min(125, Math.max(85, Number(settings.font_size) || 100));
+  const viewportWidth = Math.max(320, Number(window.innerWidth) || 1280);
+  const viewportBoost = Math.min(1.16, Math.max(1, 1 + (viewportWidth - 1280) / 8000));
+  const readableScale = 1.32 * viewportBoost * (fontSize / 100);
   root.dataset.theme = settings.theme || "cloud";
   root.style.setProperty(
     "--app-font-family",
     selectedFont === "system"
-      ? '"Segoe UI Variable", "Microsoft YaHei UI", "PingFang SC", sans-serif'
-      : `"${selectedFont}", "Microsoft YaHei UI", sans-serif`,
+      ? '"Segoe UI Variable Text", "Segoe UI Variable", "Microsoft YaHei UI", "PingFang SC", sans-serif'
+      : `"${selectedFont}", "Microsoft YaHei UI", "Segoe UI Variable Text", sans-serif`,
   );
-  root.style.setProperty("--font-scale", String(fontSize / 100));
+  root.style.setProperty("--font-scale", readableScale.toFixed(4));
 }
 
 const normalizeAIProviders = (settings) => {
   if (Array.isArray(settings.ai_providers) && settings.ai_providers.length) {
-    return settings.ai_providers.map((provider, index) => ({
-      id: provider.id || `provider-${index + 1}`,
-      name: provider.name || `自定义服务 ${index + 1}`,
-      protocol: provider.protocol === "anthropic" ? "anthropic" : "openai",
-      base_url: provider.base_url || "",
-      model_id: provider.model_id || "",
-      api_key: provider.api_key || "",
-    }));
+    return settings.ai_providers.map(normalizeProvider);
   }
   return [{
+    ...createPresetProvider(AI_PROVIDER_PRESETS[0]),
     id: "deepseek-default",
-    name: "DeepSeek",
-    protocol: "openai",
-    base_url: settings.ai_base_url || "https://api.deepseek.com",
-    model_id: settings.ai_model || "deepseek-chat",
+    model_id: settings.ai_model || "deepseek-v4-flash",
     api_key: settings.ai_api_key || "",
   }];
+};
+
+const migrateAIProviderCatalog = (providers, storedSettings) => {
+  if (Number(storedSettings.ai_provider_catalog_version) >= AI_PROVIDER_CATALOG_VERSION) return providers;
+  const agnesPreset = AI_PROVIDER_PRESETS.find((provider) => provider.id === "agnes-ai");
+  const normalized = providers.map((provider) => {
+    if (provider.id === "deepseek-default") {
+      return { ...provider, id: "deepseek-openai", model_id: provider.model_id === "deepseek-chat" ? "deepseek-v4-flash" : provider.model_id };
+    }
+    if (provider.id === "agnes-image") {
+      return {
+        ...provider,
+        ...agnesPreset,
+        id: "agnes-ai",
+        api_key: provider.api_key || "",
+        model_id: provider.model_id === "agnes-image-2.5-flash" ? agnesPreset.model_id : provider.model_id,
+      };
+    }
+    return provider;
+  });
+  const presentIds = new Set(normalized.map((provider) => provider.id));
+  return [...normalized, ...AI_PROVIDER_PRESETS.filter((preset) => !presentIds.has(preset.id)).map(createPresetProvider)];
 };
 
 const normalizeEvents = (events) => events.map((event) => {
@@ -182,9 +281,12 @@ const mergeData = (raw = {}) => {
     ]),
   );
   settings.theme = settings.theme === "dark" ? "obsidian" : settings.theme;
-  settings.ai_providers = normalizeAIProviders(settings);
-  if (!settings.ai_providers.some((provider) => provider.id === settings.active_ai_provider_id)) {
-    settings.active_ai_provider_id = settings.ai_providers[0].id;
+  settings.ai_providers = migrateAIProviderCatalog(normalizeAIProviders(settings), storedSettings);
+  settings.ai_provider_catalog_version = AI_PROVIDER_CATALOG_VERSION;
+  if (settings.active_ai_provider_id === "agnes-image") settings.active_ai_provider_id = "agnes-ai";
+  const activeProvider = settings.ai_providers.find((provider) => provider.id === settings.active_ai_provider_id);
+  if (!activeProvider || activeProvider.capability !== "chat") {
+    settings.active_ai_provider_id = settings.ai_providers.find((provider) => provider.capability === "chat")?.id || settings.ai_providers[0]?.id;
   }
   return {
     ...DEFAULT_DATA,
@@ -203,7 +305,9 @@ const mergeData = (raw = {}) => {
 
 export const getActiveAIProvider = (settings = {}) => {
   const providers = normalizeAIProviders(settings);
-  return providers.find((provider) => provider.id === settings.active_ai_provider_id) || providers[0];
+  return providers.find((provider) => provider.id === settings.active_ai_provider_id && provider.capability === "chat")
+    || providers.find((provider) => provider.capability === "chat")
+    || providers[0];
 };
 
 export async function loadData() {
