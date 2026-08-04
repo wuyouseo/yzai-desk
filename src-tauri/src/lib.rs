@@ -9,8 +9,20 @@ mod system_fonts;
 mod system_status;
 
 use tauri::Manager;
-use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
+
+fn show_settings_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("settings") {
+        if window.is_minimized().unwrap_or(false) {
+            let _ = window.unminimize();
+        }
+        if !window.is_visible().unwrap_or(false) {
+            let _ = window.show();
+        }
+        let _ = window.set_focus();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -112,10 +124,7 @@ pub fn run() {
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {
                         "show_settings" => {
-                            if let Some(win) = app.get_webview_window("settings") {
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
+                            show_settings_window(app);
                         },
                         "exit" => {
                             app.exit(0);
@@ -124,17 +133,13 @@ pub fn run() {
                     }
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
-                        let app = tray.app_handle();
-                        if let Some(win) = app.get_webview_window("settings") {
-                            let is_visible = win.is_visible().unwrap_or(false);
-                            if is_visible {
-                                let _ = win.hide();
-                            } else {
-                                let _ = win.show();
-                                let _ = win.set_focus();
-                            }
-                        }
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_settings_window(tray.app_handle());
                     }
                 })
                 .build(app)

@@ -1,6 +1,6 @@
 [package]
 name = "yzai-desk"
-version = "0.6.1"
+version = "0.6.6"
 description = "咏智桌面工具 (YZai Desk)"
 authors = ["无忧AI", "咏智AI团队"]
 edition = "2021"
