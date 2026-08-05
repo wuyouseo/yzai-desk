@@ -84,7 +84,7 @@ const NAV = [
   ["settings", "系统设置", Settings],
 ];
 
-const APP_VERSION = "0.6.6";
+const APP_VERSION = "0.6.7";
 
 const SETTINGS_NAV = [
   ["general", "常规", Settings],
@@ -517,10 +517,12 @@ function NotesPage({ data, commit, flash }) {
   const titleInputRef = useRef(null);
   const importTextRef = useRef(null);
   const current = data.notes.find((note) => note.id === selected);
-  const editorContent = current?.encrypted
-    ? unlocked?.content || ""
-    : plainDraft?.id === current?.id ? plainDraft.content : current?.content || "";
-  const editorTitle = titleDraft?.id === current?.id ? titleDraft.title : current?.title || "";
+  const editorContent = !current
+    ? ""
+    : current.encrypted
+      ? unlocked?.content || ""
+      : plainDraft?.id === current.id ? plainDraft.content : current.content || "";
+  const editorTitle = current && titleDraft?.id === current.id ? titleDraft.title : current?.title || "";
   const update = (patch, message) => commit({ ...data, notes: data.notes.map((note) => note.id === selected ? { ...note, ...patch, updated_at: new Date().toISOString() } : note) }, message);
 
   useEffect(() => {
