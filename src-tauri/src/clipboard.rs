@@ -90,7 +90,8 @@ pub fn start_clipboard_listener(app_handle: AppHandle) {
                         
                         // Update Database
                         let item_for_db = new_item.clone();
-                        let _ = db::update_db(|data| {
+                        if !is_sensitive {
+                        let saved = db::update_db(|data| {
                             if let Some(arr) = data.get_mut("clipboard").and_then(|value| value.as_array_mut()) {
                                 // Insert at beginning
                                 arr.insert(0, json!(item_for_db));
@@ -115,8 +116,9 @@ pub fn start_clipboard_listener(app_handle: AppHandle) {
                             ((), true)
                         });
                         
-                        // Emit event to frontend
-                        let _ = app_handle.emit("clipboard-changed", new_item);
+                        // Emit only after persistence succeeded. Sensitive text stays out of history.
+                        if saved.is_ok() { let _ = app_handle.emit("clipboard-changed", new_item); }
+                        }
                         
                         // Handle sensitive text timer
                         if is_sensitive {
@@ -140,8 +142,8 @@ pub fn start_clipboard_listener(app_handle: AppHandle) {
                 // Read DB settings only after releasing the state lock so the
                 // listener never holds a synchronous mutex across async work.
                 let db_data = db::read_db();
-                let sensitive_clear_enabled = db_data
-                    .get("settings")
+                let sensitive_clear_enabled = db_data.as_ref().ok()
+                    .and_then(|data| data.get("settings"))
                     .and_then(|s| s.get("sensitive_auto_clear"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);

@@ -4992,9 +4992,10 @@ dependencies = [
 
 [[package]]
 name = "yzai-desk"
-version = "0.6.7"
+version = "1.0.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "chrono",
  "serde",
  "serde_json",
@@ -5004,6 +5005,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "uuid",
+ "windows",
  "windows-sys 0.52.0",
  "winreg 0.52.0",
 ]

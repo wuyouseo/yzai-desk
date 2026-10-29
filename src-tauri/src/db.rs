@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
+use crate::data_merge::merge_change;
+use crate::data_secrets::{read_db_file, redact_secrets, transform_secrets};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -45,6 +47,8 @@ fn storage_config_path() -> PathBuf {
 }
 
 fn configured_storage_dir() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
+    if let Some(path) = std::env::var_os("YZAI_TEST_DATA_DIR") { return Some(PathBuf::from(path)); }
     let content = fs::read_to_string(storage_config_path()).ok()?;
     let config: serde_json::Value = serde_json::from_str(&content).ok()?;
     let value = config.get("custom_path")?.as_str()?.trim();
@@ -171,7 +175,7 @@ fn default_db() -> serde_json::Value {
                 "description": "OpenAI 兼容 · 文本生成",
                 "api_key": ""
             }],
-            "pomo_duration": 25,
+            "pomo_duration": 15,
             "sensitive_auto_clear": true,
             "note_password_config": null,
             "mini_widgets": {
@@ -197,11 +201,17 @@ fn sync_ai_archive(data: &serde_json::Value, db_dir: &Path) -> Result<(), String
 }
 
 fn write_db_at(data: &serde_json::Value, db_dir: &Path) -> Result<(), String> {
+    write_db_at_with_archive(data, db_dir, true)
+}
+
+fn write_db_at_with_archive(data: &serde_json::Value, db_dir: &Path, update_archive: bool) -> Result<(), String> {
     ensure_storage_layout(db_dir)?;
     let file_path = db_dir.join(DB_FILE);
     let tmp_path = db_dir.join("data.json.tmp");
     let backup_path = db_dir.join("data.json.bak");
-    let content = serde_json::to_string_pretty(data).map_err(|error| error.to_string())?;
+    let mut protected = data.clone();
+    transform_secrets(&mut protected, true)?;
+    let content = serde_json::to_string_pretty(&protected).map_err(|error| error.to_string())?;
 
     fs::write(&tmp_path, content).map_err(|error| error.to_string())?;
     if file_path.exists() {
@@ -213,13 +223,12 @@ fn write_db_at(data: &serde_json::Value, db_dir: &Path) -> Result<(), String> {
             let _ = fs::rename(&backup_path, &file_path);
             return Err(error.to_string());
         }
-        let _ = fs::remove_file(&backup_path);
     } else {
         fs::rename(&tmp_path, &file_path).map_err(|error| error.to_string())?;
     }
 
-    if let Err(error) = sync_ai_archive(data, db_dir) {
-        eprintln!("Failed to update AI conversation archive: {error}");
+    if update_archive {
+        if let Err(error) = sync_ai_archive(data, db_dir) { eprintln!("Failed to update AI conversation archive: {error}"); }
     }
     Ok(())
 }
@@ -239,18 +248,27 @@ pub fn init_db() -> Result<(), String> {
 
     let file_path = db_dir.join(DB_FILE);
     if !file_path.exists() {
+        let interrupted_backup = db_dir.join("data.json.bak");
         let legacy_path = legacy_data_dir().join(DB_FILE);
-        if legacy_path.exists() && legacy_path != file_path {
+        let skip_legacy = cfg!(debug_assertions) && std::env::var_os("YZAI_TEST_DATA_DIR").is_some();
+        if interrupted_backup.exists() {
+            let data = read_db_file(&interrupted_backup)?;
+            write_db_at(&data, &db_dir)?;
+        } else if !skip_legacy && legacy_path.exists() && legacy_path != file_path {
             let content = fs::read_to_string(&legacy_path).map_err(|error| error.to_string())?;
             let data = serde_json::from_str(&content).map_err(|error| format!("旧版数据无法读取：{error}"))?;
             write_db_at(&data, &db_dir)?;
         } else {
             write_db_at(&default_db(), &db_dir)?;
         }
-    } else if let Ok(content) = fs::read_to_string(&file_path) {
-        if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
-            let _ = sync_ai_archive(&data, &db_dir);
-        }
+    } else {
+        let data = read_db_file(&file_path)?;
+        let raw = fs::read_to_string(&file_path).map_err(|error| error.to_string())?;
+        let plain: serde_json::Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+        let legacy_key = plain.pointer("/settings/ai_api_key").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty())
+            || plain.pointer("/settings/ai_providers").and_then(|v| v.as_array()).is_some_and(|ps| ps.iter().any(|p| p.get("api_key").and_then(|v| v.as_str()).is_some_and(|v| !v.is_empty())));
+        if legacy_key { write_db_at(&data, &db_dir)?; }
+        else { let _ = sync_ai_archive(&data, &db_dir); }
     }
 
     update_db(|data| {
@@ -264,21 +282,15 @@ pub fn init_db() -> Result<(), String> {
     })
 }
 
-fn read_db_unlocked() -> serde_json::Value {
-    let file_path = get_db_path().join(DB_FILE);
-    if let Ok(content) = fs::read_to_string(&file_path) {
-        if let Ok(json) = serde_json::from_str(&content) {
-            return json;
-        }
-    }
-    default_db()
+fn read_db_unlocked() -> Result<serde_json::Value, String> {
+    read_db_file(&get_db_path().join(DB_FILE))
 }
 
 fn write_db_unlocked(data: &serde_json::Value) -> Result<(), String> {
     write_db_at(data, &get_db_path())
 }
 
-pub fn read_db() -> serde_json::Value {
+pub fn read_db() -> Result<serde_json::Value, String> {
     let _guard = db_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     read_db_unlocked()
 }
@@ -293,11 +305,10 @@ where
     F: FnOnce(&mut serde_json::Value) -> (R, bool),
 {
     let _guard = db_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut data = read_db_unlocked();
+    let mut data = read_db_unlocked()?;
     let (result, changed) = update(&mut data);
-    if changed {
-        write_db_unlocked(&data)?;
-    }
+    // Internal updates only change alarms, clipboard and widget state.
+    if changed { write_db_at_with_archive(&data, &get_db_path(), false)?; }
     Ok(result)
 }
 
@@ -338,7 +349,7 @@ pub fn set_storage_directory(
 
     let _guard = db_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let current_dir = get_db_path();
-    let current_data = read_db_unlocked();
+    let current_data = read_db_unlocked()?;
     let current_canonical = fs::canonicalize(&current_dir).unwrap_or(current_dir.clone());
     let target_canonical = fs::canonicalize(&target).unwrap_or(target.clone());
 
@@ -415,13 +426,12 @@ pub fn create_backup() -> Result<String, String> {
     let _guard = db_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let root = get_db_path();
     ensure_storage_layout(&root)?;
-    let source = root.join(DB_FILE);
-    if !source.exists() {
-        return Err("本地数据不存在，无法创建备份".to_string());
-    }
-    let name = format!("yzai-desk-backup-{}.json", Local::now().format("%Y%m%d-%H%M%S"));
+    let mut data = read_db_unlocked()?;
+    redact_secrets(&mut data);
+    let name = format!("yzai-desk-backup-{}-{}.json", Local::now().format("%Y%m%d-%H%M%S"), uuid::Uuid::new_v4());
     let destination = root.join("backups").join(name);
-    fs::copy(source, &destination).map_err(|error| error.to_string())?;
+    let content = serde_json::to_vec_pretty(&data).map_err(|error| error.to_string())?;
+    fs::write(&destination, content).map_err(|error| error.to_string())?;
     Ok(destination.to_string_lossy().to_string())
 }
 
@@ -480,7 +490,7 @@ pub fn export_ai_chat_markdown(title: String, content: String) -> Result<String,
 }
 
 #[tauri::command]
-pub fn get_data() -> serde_json::Value {
+pub fn get_data() -> Result<serde_json::Value, String> {
     read_db()
 }
 
@@ -489,24 +499,70 @@ pub fn save_data(
     app: tauri::AppHandle,
     data: serde_json::Value,
     changed_sections: Option<Vec<String>>,
+    base_data: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let next = update_db(move |current| {
-        if let Some(sections) = changed_sections {
-            for section in sections {
-                if let Some(value) = data.get(&section) {
-                    current[section] = value.clone();
-                }
+    let _guard = db_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut current = read_db_unlocked()?;
+    let mut update_archive = false;
+    if let Some(sections) = changed_sections {
+        for section in sections {
+            if section == "ai_conversations" { update_archive = true; }
+            if let Some(value) = data.get(&section) {
+                let merged = match (base_data.as_ref().and_then(|b| b.get(&section)), current.get(&section)) {
+                    (Some(base), Some(latest)) => merge_change(base, value, latest)?,
+                    (None, None) | (Some(_), None) => value.clone(),
+                    _ => return Err("数据已更新，请重新打开后重试".into()),
+                };
+                current[section] = merged;
             }
-        } else {
-            *current = if data.is_object() { data } else { json!({}) };
         }
-        (current.clone(), true)
-    })?;
+    } else {
+        return Err("需要提供修改范围以保护本地数据".into());
+    }
+    write_db_at_with_archive(&current, &get_db_path(), update_archive)?;
+    let next = current;
     if let Some(settings) = next.get("settings") {
         let _ = app.emit("settings-changed", settings.clone());
     }
     let _ = app.emit("data-changed", next.clone());
     Ok(next)
+}
+
+#[tauri::command]
+pub fn restore_data(app: tauri::AppHandle, mut data: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !data.get("events").is_some_and(|v| v.is_array()) || !data.get("notes").is_some_and(|v| v.is_array()) || !data.get("settings").is_some_and(|v| v.is_object()) {
+        return Err("备份数据结构不完整".into());
+    }
+    let _guard = db_lock().lock().unwrap_or_else(|p| p.into_inner());
+    let current = read_db_unlocked()?;
+    let root = get_db_path();
+    ensure_storage_layout(&root)?;
+    let backup = root.join("backups").join(format!("before-restore-{}-{}.json", Local::now().format("%Y%m%d-%H%M%S"), uuid::Uuid::new_v4()));
+    fs::copy(root.join(DB_FILE), backup).map_err(|e| format!("恢复前备份失败：{e}"))?;
+    // A portable backup intentionally omits keys. Keep matching local keys.
+    if let Some(settings) = data.get_mut("settings") {
+        if settings.get("ai_api_key").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+            if let Some(key) = current.pointer("/settings/ai_api_key") { settings["ai_api_key"] = key.clone(); }
+        }
+        if let Some(providers) = settings.get_mut("ai_providers").and_then(|v| v.as_array_mut()) {
+            for provider in providers {
+                if provider.get("api_key").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                    let id = provider.get("id").and_then(|v| v.as_str());
+                    if let Some(key) = current.pointer("/settings/ai_providers").and_then(|v| v.as_array()).and_then(|ps| ps.iter().find(|p| p.get("id").and_then(|v| v.as_str()) == id)).and_then(|p| p.get("api_key")) {
+                        provider["api_key"] = key.clone();
+                    }
+                }
+            }
+        }
+    }
+    write_db_unlocked(&data)?;
+    drop(_guard);
+    crate::alarm::reload_pomo_state(&data);
+    crate::alarm::reload_notifications(&app);
+    let _ = app.emit("settings-changed", data.get("settings").cloned().unwrap_or_else(|| json!({})));
+    let _ = app.emit("data-changed", data.clone());
+    let _ = app.emit("pomo-changed", data.get("pomo_state").cloned().unwrap_or(serde_json::Value::Null));
+    Ok(data)
 }
 
 #[tauri::command]
@@ -559,6 +615,42 @@ mod tests {
 
         let archive = fs::read_to_string(root.join("ai-chats").join("conversations.json")).unwrap();
         assert!(archive.contains("chat-1"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn merges_independent_record_edits_and_rejects_conflicts() {
+        let base = json!([{ "id": "a", "content": "old", "title": "A" }, { "id": "b", "content": "old" }]);
+        let first = json!([{ "id": "a", "content": "new", "title": "A" }, { "id": "b", "content": "old" }]);
+        let second = json!([{ "id": "a", "content": "old", "title": "A" }, { "id": "b", "content": "other" }]);
+        let merged = merge_change(&base, &first, &second).unwrap();
+        assert_eq!(merged[0]["content"], "new");
+        assert_eq!(merged[1]["content"], "other");
+        let conflicting = json!([{ "id": "a", "content": "conflict", "title": "A" }, { "id": "b", "content": "old" }]);
+        assert!(merge_change(&base, &first, &conflicting).is_err());
+    }
+
+    #[test]
+    fn corrupted_file_is_rejected_and_not_overwritten() {
+        let root = std::env::temp_dir().join(format!("yzai-corrupt-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join(DB_FILE);
+        fs::write(&path, b"{broken").unwrap();
+        assert!(read_db_file(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"{broken");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn protected_keys_roundtrip_and_backups_are_redacted() {
+        let root = std::env::temp_dir().join(format!("yzai-secret-{}", uuid::Uuid::new_v4()));
+        let data = json!({"settings": {"ai_api_key": "legacy-secret", "ai_providers": [{"id":"p", "api_key":"example-secret"}]}});
+        write_db_at(&data, &root).unwrap();
+        let disk = fs::read_to_string(root.join(DB_FILE)).unwrap();
+        assert!(!disk.contains("example-secret") && !disk.contains("legacy-secret"));
+        assert_eq!(read_db_file(&root.join(DB_FILE)).unwrap(), data);
+        let mut backup = data.clone(); redact_secrets(&mut backup);
+        assert_eq!(backup["settings"]["ai_providers"][0]["api_key"], "");
         fs::remove_dir_all(root).unwrap();
     }
 

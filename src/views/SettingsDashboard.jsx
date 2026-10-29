@@ -71,6 +71,8 @@ import {
   verifyNotePassword,
 } from "../lib/deskApi";
 import { lookupWeatherLocation, verifyWeatherLocation } from "../lib/weatherApi";
+import { usePomo } from "../lib/usePomo";
+import FocusDurationPicker from "../components/FocusDurationPicker";
 import brandLogo from "../../logo-1.png";
 
 const NAV = [
@@ -84,7 +86,7 @@ const NAV = [
   ["settings", "系统设置", Settings],
 ];
 
-const APP_VERSION = "0.6.7";
+const APP_VERSION = "1.0.0";
 
 const SETTINGS_NAV = [
   ["general", "常规", Settings],
@@ -96,6 +98,7 @@ const SETTINGS_NAV = [
 ];
 
 const THEMES = [
+  { id: "system", name: "跟随系统", description: "自动切换深浅色", colors: ["#eef1f7", "#16171f", "#7557d9"] },
   { id: "obsidian", name: "曜石紫", description: "沉稳深色与紫色高光", colors: ["#090a0f", "#8d6cff", "#5fd7e5"] },
   { id: "midnight", name: "午夜蓝", description: "冷静蓝黑与冰蓝强调", colors: ["#07111d", "#4f8cff", "#55d8ff"] },
   { id: "aurora", name: "极光青", description: "墨绿背景与青绿光感", colors: ["#071411", "#34c9a5", "#8de7d1"] },
@@ -221,6 +224,7 @@ class PageErrorBoundary extends Component {
 
 function SettingsDashboard() {
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState("");
   const [active, setActive] = useState("overview");
   const [toast, setToast] = useState("");
   const [month, setMonth] = useState(new Date());
@@ -228,7 +232,7 @@ function SettingsDashboard() {
   const importRef = useRef(null);
 
   useEffect(() => {
-    loadData().then(setData);
+    loadData().then(setData).catch((error) => setLoadError(String(error?.message || error)));
     const cleanups = [
       subscribe("data-changed", (nextData) => setData(nextData)),
       subscribe("clipboard-changed", (item) => setData((current) => current && ({ ...current, clipboard: [item, ...current.clipboard] }))),
@@ -254,9 +258,15 @@ function SettingsDashboard() {
     const changedSections = Object.keys(next).filter(
       (section) => JSON.stringify(next[section]) !== JSON.stringify(data?.[section]),
     );
-    const saved = await saveData(next, changedSections);
-    setData(saved);
-    if (message) flash(message);
+    try {
+      if (!changedSections.length) return;
+      const saved = await saveData(next, changedSections, data);
+      setData(saved);
+      if (message) flash(message);
+    } catch (error) {
+      flash(`保存失败：${error?.message || error}`);
+      throw error;
+    }
   };
 
   const todayEvents = useMemo(
@@ -264,6 +274,7 @@ function SettingsDashboard() {
     [data],
   );
 
+  if (loadError) return <div className="app-loading"><p>无法读取本地数据：{loadError}</p><button onClick={() => window.location.reload()}>重试</button></div>;
   if (!data) return <div className="app-loading"><div className="loading-orb" /><p>正在整理你的桌面…</p></div>;
 
   const openNewEvent = (selectedDate = new Date(), kind = "schedule") => {
@@ -280,7 +291,8 @@ function SettingsDashboard() {
     const reminderChanged = !previous
       || new Date(previous.time).getTime() !== new Date(normalizedTime).getTime()
       || previous.remind !== event.remind
-      || previous.kind !== event.kind;
+      || previous.kind !== event.kind
+      || previous.recurring !== event.recurring;
     const normalized = {
       ...event,
       id: event.id || uid(),
@@ -289,6 +301,7 @@ function SettingsDashboard() {
       remind: event.kind === "memo" ? false : event.kind === "reminder" ? true : event.remind !== false,
       recurring: event.kind === "memo" ? "none" : event.recurring || "none",
       notified_at: reminderChanged ? null : event.notified_at || null,
+      recurring_day: reminderChanged ? null : event.recurring_day || null,
       time: normalizedTime,
     };
     const exists = data.events.some((item) => item.id === normalized.id);
@@ -317,7 +330,7 @@ function SettingsDashboard() {
           ))}
         </nav>
         <div className="privacy-card"><ShieldCheck size={18} /><div><strong>本地隐私保护</strong><span>数据仅存储在此设备</span></div></div>
-        <div className="sidebar-foot"><span className="status-dot" /> 后台服务运行中 <small>v{APP_VERSION}</small></div>
+        <div className="sidebar-foot"><span className="status-dot" /> 咏智桌面 <small>v{APP_VERSION}</small></div>
       </aside>
 
       <main className={`dashboard dashboard-${active}`}>
@@ -335,7 +348,7 @@ function SettingsDashboard() {
             {active === "clipboard" && <ClipboardPage data={data} commit={commit} flash={flash} />}
             {active === "focus" && <FocusPage data={data} />}
             {active === "assistant" && <AssistantPage data={data} commit={commit} flash={flash} />}
-            {active === "settings" && <SettingsPage data={data} commit={commit} importRef={importRef} flash={flash} />}
+            {active === "settings" && <SettingsPage data={data} commit={commit} importRef={importRef} flash={flash} setDataFromRestore={setData} setActive={setActive} />}
           </PageErrorBoundary>
         </div>
       </main>
@@ -349,7 +362,7 @@ function SettingsDashboard() {
 function Overview({ data, todayEvents, setActive, openNewEvent, commit }) {
   const undone = data.events.filter((event) => !event.done).length;
   const todayPomos = data.pomo_stats?.[dateKey(new Date())] || 0;
-  const focusMinutes = todayPomos * Number(data.settings.pomo_duration || 25);
+  const focusMinutes = data.pomo_minutes?.[dateKey(new Date())] ?? todayPomos * Number(data.settings.pomo_duration || 25);
   const greeting = new Date().getHours() < 12 ? "早上好" : new Date().getHours() < 18 ? "下午好" : "晚上好";
   const toggleEvent = (id) => commit({ ...data, events: data.events.map((item) => item.id === id ? { ...item, done: !item.done } : item) });
 
@@ -701,7 +714,7 @@ function NotesPage({ data, commit, flash }) {
 
   return <section className="panel notes-workspace">
     <aside><div className="section-actions"><label className="search-box"><Search size={16} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索备忘录" /></label><button className="icon-button filled" title="新建备忘录" onClick={add}><Plus /></button></div><div className="note-list">{filtered.map((note) => <button className={selected === note.id ? "active" : ""} key={note.id} onClick={() => { setSelected(note.id); setUnlocked(null); setMoreOpen(false); }}><span>{note.encrypted ? <LockKeyhole size={15} /> : <NotebookPen size={15} />}{note.category}{note.pinned && <em><Pin size={10} />置顶</em>}</span><strong>{note.title}</strong><p>{note.encrypted ? "AES-256-GCM 加密内容" : note.content || "空白备忘录"}</p><time>{new Date(note.updated_at).toLocaleDateString("zh-CN")}</time></button>)}</div></aside>
-    <div className="note-editor">{current ? <><div className="editor-toolbar"><input ref={titleInputRef} className="note-title" value={editorTitle} maxLength="80" onChange={(event) => setTitleDraft({ id: current.id, title: event.target.value })} onBlur={saveTitleDraft} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><div><button className={`icon-button ${current.encrypted ? "locked" : ""}`} title={current.encrypted ? (unlocked?.id === current.id ? "锁定备忘录" : "解锁备忘录") : "锁定备忘录"} onClick={toggleLock}><LockKeyhole /></button><button className="icon-button danger" onClick={remove}><Trash2 /></button><div className="note-more"><button className={`icon-button ${moreOpen ? "active" : ""}`} title="更多操作" onClick={() => setMoreOpen((value) => !value)}><MoreHorizontal /></button>{moreOpen && <div className="note-more-menu"><button onClick={togglePinned}><Pin />{current.pinned ? "取消置顶" : "置顶备忘录"}</button><button onClick={() => { setMoreOpen(false); importTextRef.current?.click(); }}><FileUp />导入文本</button><button onClick={exportText}><FileDown />导出文本</button></div>}</div></div></div><div className="note-meta"><span>{current.category}</span><span>{current.encrypted ? "AES-256-GCM 加密存储" : "保存于本机"}</span>{current.pinned && <span>已置顶</span>}</div>{current.encrypted && unlocked?.id !== current.id ? <EmptyState icon={LockKeyhole} text="这条备忘录已加密" action="使用统一密码解锁" onClick={unlockNote} /> : <><div className="format-toolbar"><span>格式</span><button title="加粗" onClick={() => applyFormat("bold")}><Bold /></button><button title="斜体" onClick={() => applyFormat("italic")}><Italic /></button><i /><button title="无序列表" onClick={() => applyFormat("unordered")}><List /></button><button title="有序列表" onClick={() => applyFormat("ordered")}><ListOrdered /></button><small>支持 Markdown 格式</small></div><textarea ref={textareaRef} value={editorContent} onChange={(e) => setEditorContent(e.target.value)} onBlur={saveEditorDraft} placeholder="写下此刻的想法…" /></>}</> : <EmptyState icon={NotebookPen} text="选择或创建一条备忘录" action="新建备忘录" onClick={add} />}<input ref={importTextRef} type="file" hidden accept="text/plain,text/markdown,.txt,.md" onChange={importText} /></div>
+    <div className="note-editor">{current ? <><div className="editor-toolbar"><input ref={titleInputRef} className="note-title" value={editorTitle} maxLength="80" onChange={(event) => setTitleDraft({ id: current.id, title: event.target.value })} onBlur={saveTitleDraft} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} /><div><button className={`icon-button ${current.encrypted ? "locked" : ""}`} title={current.encrypted ? (unlocked?.id === current.id ? "锁定备忘录" : "解锁备忘录") : "锁定备忘录"} onClick={toggleLock}><LockKeyhole /></button><button className="icon-button danger" title="删除备忘录" aria-label="删除备忘录" onClick={remove}><Trash2 /></button><div className="note-more"><button className={`icon-button ${moreOpen ? "active" : ""}`} title="更多操作" onClick={() => setMoreOpen((value) => !value)}><MoreHorizontal /></button>{moreOpen && <div className="note-more-menu"><button onClick={togglePinned}><Pin />{current.pinned ? "取消置顶" : "置顶备忘录"}</button><button onClick={() => { setMoreOpen(false); importTextRef.current?.click(); }}><FileUp />导入文本</button><button onClick={exportText}><FileDown />导出文本</button></div>}</div></div></div><div className="note-meta"><span>{current.category}</span><span>{current.encrypted ? "AES-256-GCM 加密存储" : "保存于本机"}</span>{current.pinned && <span>已置顶</span>}</div>{current.encrypted && unlocked?.id !== current.id ? <EmptyState icon={LockKeyhole} text="这条备忘录已加密" action="使用统一密码解锁" onClick={unlockNote} /> : <><div className="format-toolbar"><span>格式</span><button title="加粗" onClick={() => applyFormat("bold")}><Bold /></button><button title="斜体" onClick={() => applyFormat("italic")}><Italic /></button><i /><button title="无序列表" onClick={() => applyFormat("unordered")}><List /></button><button title="有序列表" onClick={() => applyFormat("ordered")}><ListOrdered /></button><small>支持 Markdown 格式</small></div><textarea ref={textareaRef} value={editorContent} onChange={(e) => setEditorContent(e.target.value)} onBlur={saveEditorDraft} placeholder="写下此刻的想法…" /></>}</> : <EmptyState icon={NotebookPen} text="选择或创建一条备忘录" action="新建备忘录" onClick={add} />}<input ref={importTextRef} type="file" hidden accept="text/plain,text/markdown,.txt,.md" onChange={importText} /></div>
   </section>;
 }
 
@@ -740,30 +753,8 @@ function ClipboardPage({ data, commit, flash }) {
 }
 
 function FocusPage({ data }) {
-  const [active, setActive] = useState(false);
-  const [seconds, setSeconds] = useState(Number(data.settings.pomo_duration || 25) * 60);
-  const [sessionDuration, setSessionDuration] = useState(Number(data.settings.pomo_duration || 25) * 60);
+  const { seconds, total: sessionDuration, running: active, hasSession, error, setDuration, start, pause, reset } = usePomo(data.settings.pomo_duration, "深度专注");
   const duration = Math.max(1, sessionDuration);
-  useEffect(() => {
-    callCommand("get_active_pomo").then((session) => {
-      if (!session) return;
-      const remaining = session.running
-        ? Math.max(0, Math.ceil((new Date(session.target_time).getTime() - Date.now()) / 1000))
-        : Number(session.remaining_seconds || 0);
-      setSeconds(remaining);
-      setSessionDuration(Number(session.duration_mins || data.settings.pomo_duration || 25) * 60);
-      setActive(Boolean(session.running && remaining > 0));
-    });
-  }, []);
-  useEffect(() => {
-    if (!active) return undefined;
-    const timer = setInterval(() => setSeconds((value) => value > 0 ? value - 1 : 0), 1000);
-    return () => clearInterval(timer);
-  }, [active]);
-  useEffect(() => { if (seconds === 0) setActive(false); }, [seconds]);
-  const start = async () => { await callCommand("start_pomo", { seconds: Math.max(1, seconds), durationMins: Math.max(1, Math.ceil(duration / 60)), label: "深度专注" }); setActive(true); };
-  const pause = async () => { const session = await callCommand("pause_pomo"); setSeconds(Number(session?.remaining_seconds ?? seconds)); setActive(false); };
-  const reset = async () => { const nextDuration = Number(data.settings.pomo_duration || 25) * 60; await callCommand("stop_pomo"); setActive(false); setSessionDuration(nextDuration); setSeconds(nextDuration); };
   const days = Array.from({ length: 7 }, (_, index) => { const day = new Date(); day.setDate(day.getDate() - (6 - index)); const key = dateKey(day); return { label: day.toLocaleDateString("zh-CN", { weekday: "short" }), count: data.pomo_stats?.[key] || 0, minutes: data.pomo_minutes?.[key] ?? (data.pomo_stats?.[key] || 0) * Number(data.settings.pomo_duration || 25) }; });
   const max = Math.max(4, ...days.map((day) => day.count));
   const weekSessions = days.reduce((sum, day) => sum + day.count, 0);
@@ -773,9 +764,11 @@ function FocusPage({ data }) {
     <section className="panel timer-panel">
       <span className="eyebrow"><Flame size={14} /> FOCUS SESSION</span>
       <div className="focus-session-copy"><h2>开始一段专注时间</h2><p>一次只做一件事，完成后会自动计入最近 7 天统计。</p></div>
-      <div className="timer-ring" style={{ "--angle": `${Math.min(1, seconds / duration) * 360}deg` }}><div><strong>{pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}</strong><span>{active ? "保持专注" : seconds < duration ? "已暂停" : "准备开始"}</span></div></div>
-      <input value="深度专注" aria-label="专注名称" readOnly />
-      <div className="timer-actions"><button className="ghost-button" onClick={reset}>重置</button><button className="primary-button" onClick={active ? pause : start}>{active ? "暂停" : seconds < duration ? "继续专注" : "开始专注"}</button></div>
+      <div className="timer-ring" style={{ "--angle": `${Math.min(1, seconds / duration) * 360}deg` }}><div><strong>{pad(Math.floor(seconds / 60))}:{pad(seconds % 60)}</strong><span>{active ? "保持专注" : seconds === 0 ? "本次完成" : hasSession ? "已暂停" : "准备开始"}</span></div></div>
+      <FocusDurationPicker minutes={Math.round(duration / 60)} disabled={hasSession} onSelect={setDuration} />
+      {hasSession && <small className="focus-duration-hint">重置后可更改时长</small>}
+      {error && <small className="focus-duration-error" role="alert">{error}</small>}
+      <div className="timer-actions"><button className="ghost-button" onClick={reset}>重置</button><button className="primary-button" onClick={active ? pause : start}>{active ? "暂停" : seconds === 0 ? "再次开始" : hasSession ? "继续专注" : "开始专注"}</button></div>
     </section>
     <section className="panel stats-panel">
       <PanelHead title="最近 7 天" />
@@ -818,6 +811,8 @@ function AssistantPage({ data, commit, flash }) {
   const [savingAnswerId, setSavingAnswerId] = useState(null);
   const fileInputRef = useRef(null);
   const messageListRef = useRef(null);
+  const requestRef = useRef(null);
+  useEffect(() => () => requestRef.current?.abort(), []);
   const activeConversation = conversations.find((conversation) => conversation.id === selectedId);
 
   useEffect(() => {
@@ -923,17 +918,19 @@ function AssistantPage({ data, commit, flash }) {
     setLoading(true);
 
     let answer = "";
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
       answer = await askAI(requestMessages, settings, (content) => {
         answer = content;
         setMessages([...requestMessages, { ...assistantMessage, content }]);
-      });
+      }, { signal: controller.signal });
       if (!answer.trim()) {
         answer = "模型没有返回可显示的内容，请重新发送或检查当前服务配置。";
         setMessages([...requestMessages, { ...assistantMessage, content: answer }]);
       }
     } catch (error) {
-      answer = `暂时无法回答：${error.message}`;
+      answer = answer ? `${answer}\n\n（${error.message}）` : `暂时无法回答：${error.message}`;
       setMessages([...requestMessages, { ...assistantMessage, content: answer }]);
     }
 
@@ -956,6 +953,7 @@ function AssistantPage({ data, commit, flash }) {
     } catch (error) {
       flash(`对话保存失败：${error.message}`);
     } finally {
+      requestRef.current = null;
       setLoading(false);
     }
   };
@@ -1017,7 +1015,7 @@ function AssistantPage({ data, commit, flash }) {
             <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.txt,.md,.csv,.json,.js,.jsx,.ts,.tsx,.py,.html,.css,.xml,.yaml,.yml,.log" onChange={attachFiles} hidden />
             <button className="attach-button" type="button" onClick={() => fileInputRef.current?.click()} disabled={loading || attachments.length >= MAX_ATTACHMENT_COUNT} title="上传图片或附件"><Paperclip /></button>
             <textarea value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder="输入问题，Shift + Enter 换行…" rows={1} />
-            <button className="send-button" disabled={(!input.trim() && !attachments.length) || loading}>{loading ? <i className="typing" /> : <><Send />发送</>}</button>
+            {loading ? <button className="send-button" type="button" onClick={() => requestRef.current?.abort()}>停止</button> : <button className="send-button" disabled={!input.trim() && !attachments.length}><Send />发送</button>}
           </div>
           <small>支持图片、PDF、文本和代码附件 · 内容仅发送给当前配置的 AI 服务</small>
         </form>
@@ -1026,7 +1024,7 @@ function AssistantPage({ data, commit, flash }) {
   );
 }
 
-function SettingsPage({ data, commit, importRef, flash }) {
+function SettingsPage({ data, commit, importRef, flash, setDataFromRestore, setActive }) {
   const settings = data.settings;
   const [section, setSection] = useState("general");
   const [miniWidgetStates, setMiniWidgetStates] = useState({});
@@ -1045,7 +1043,7 @@ function SettingsPage({ data, commit, importRef, flash }) {
     callCommand("get_system_fonts").then((fonts) => {
       if (Array.isArray(fonts) && fonts.length) setSystemFonts(fonts);
     });
-    callCommand("install_desktop_context_menu").catch(() => {});
+    const offWidgets = subscribe("widget-visibility-changed", ({ kind, visible }) => setMiniWidgetStates((current) => ({ ...current, [kind]: visible })));
     callCommand("get_storage_info").then((info) => {
       setStorageInfo(info || {
         root_path: "软件安装目录\\data",
@@ -1057,6 +1055,7 @@ function SettingsPage({ data, commit, importRef, flash }) {
         is_custom: false,
       });
     });
+    return () => { offWidgets.then((off) => off()); };
   }, []);
   useEffect(() => {
     settingsDetailRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -1097,6 +1096,17 @@ function SettingsPage({ data, commit, importRef, flash }) {
       setMiniWidgetPending(null);
     }
   };
+  const changeWidgetLayout = async (kind, action) => {
+    if (miniWidgetPending) return;
+    if (!window.__TAURI_INTERNALS__) return flash("请在桌面版中调整挂件布局");
+    setMiniWidgetPending(kind || "layout");
+    try {
+      if (kind) await callCommand("widget_action", { kind, action });
+      else await callCommand(action === "save" ? "save_widget_layout" : "restore_widget_layout");
+      flash(kind ? "挂件布局已更新" : action === "save" ? "整套挂件布局已保存" : "整套挂件布局已恢复");
+    } catch (error) { flash(`布局调整失败：${error?.message || error}`); }
+    finally { setMiniWidgetPending(null); }
+  };
   const update = async (patch, message) => {
     const nextSettings = { ...settings, ...patch };
     if (Object.hasOwn(patch, "autostart")) await callCommand("set_autostart", { enable: patch.autostart });
@@ -1127,7 +1137,13 @@ function SettingsPage({ data, commit, importRef, flash }) {
   const importFile = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    try { await commit(await readBackup(file), "数据已恢复"); } catch (error) { flash(error.message); }
+    try {
+      const backup = await readBackup(file);
+      if (!window.confirm("恢复备份会替换当前数据。恢复前会自动保存当前数据，是否继续？")) return;
+      if (window.__TAURI_INTERNALS__) setDataFromRestore(await callCommand("restore_data", { data: backup }));
+      else await commit(backup);
+      flash("数据已恢复；恢复前的数据已备份");
+    } catch (error) { flash(`恢复失败：${error?.message || error}`); }
     event.target.value = "";
   };
   const copyStoragePath = async () => {
@@ -1197,7 +1213,7 @@ function SettingsPage({ data, commit, importRef, flash }) {
     }
   };
   const memoryMb = Number(memoryStatus?.working_set_mb || 0);
-  const memoryLevel = memoryMb < 200 ? "运行良好" : memoryMb < 400 ? "占用适中" : "占用较高";
+  const memoryLevel = "不含 WebView2 等子进程";
   const memoryPercent = Math.min(100, memoryMb / 512 * 100);
   const openWebsite = async () => {
     if (window.__TAURI_INTERNALS__) await openUrl("https://yzai.eu.cc");
@@ -1216,11 +1232,11 @@ function SettingsPage({ data, commit, importRef, flash }) {
     <div className="settings-detail" ref={settingsDetailRef}>
       {section === "general" && <div className="settings-stack">
         <SettingsCard title="启动与后台" description="控制应用的启动方式和后台行为。">
-          <SettingRow title="开机自动启动" description="登录 Windows 后自动在后台运行"><Toggle checked={settings.autostart} onChange={(value) => update({ autostart: value }, "启动设置已保存")} /></SettingRow>
-          <SettingRow title="敏感内容自动清理" description="敏感剪贴板内容保留 3 分钟后自动清空"><Toggle checked={settings.sensitive_auto_clear} onChange={(value) => update({ sensitive_auto_clear: value }, "隐私设置已保存")} /></SettingRow>
+          <SettingRow title="开机自动启动" description="登录 Windows 后自动在后台运行"><Toggle label="开机自动启动" checked={settings.autostart} onChange={(value) => update({ autostart: value }, "启动设置已保存")} /></SettingRow>
+          <SettingRow title="敏感内容自动清理" description="识别出的敏感内容不进入历史，可在 3 分钟后清空系统剪贴板"><Toggle label="敏感内容自动清理" checked={settings.sensitive_auto_clear} onChange={(value) => update({ sensitive_auto_clear: value }, "隐私设置已保存")} /></SettingRow>
         </SettingsCard>
         <SettingsCard title="效率偏好" description="设置日常专注和天气信息。">
-          <SettingRow title="番茄钟时长" description="新专注会话使用的默认时长"><select value={settings.pomo_duration} onChange={(e) => update({ pomo_duration: Number(e.target.value) }, "专注时长已保存")}><option value="15">15 分钟</option><option value="25">25 分钟</option><option value="45">45 分钟</option><option value="60">60 分钟</option></select></SettingRow>
+          <SettingRow title="番茄钟时长" description={`当前 ${settings.pomo_duration} 分钟，可在番茄时间页面选择或自定义`}><button className="ghost-button" onClick={() => setActive("focus")}>设置时长</button></SettingRow>
           <SettingRow title="天气城市" description={weatherCityPending ? "正在查询地区并更新天气坐标…" : "输入地区后按回车保存 · 数据由 Open-Meteo 提供"}><input className="compact-input wide" value={weatherCityInput} disabled={weatherCityPending} placeholder="例如：深圳、杭州" aria-label="天气城市" onChange={(event) => setWeatherCityInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); saveWeatherCity(); } }} /></SettingRow>
         </SettingsCard>
       </div>}
@@ -1241,12 +1257,17 @@ function SettingsPage({ data, commit, importRef, flash }) {
           <div className="widget-catalog">{MINI_WIDGETS.map((widget) => { const WidgetIcon = widget.icon; const visible = Boolean(miniWidgetStates[widget.id]); const pending = miniWidgetPending === widget.id; return <article key={widget.id} className={visible ? "active" : ""}><span><WidgetIcon /></span><div><strong>{widget.name}</strong><small>{widget.description}</small></div><button className={visible ? "ghost-button" : "primary-button"} disabled={Boolean(miniWidgetPending)} onClick={() => toggleMiniWidget(widget.id)}>{pending ? "处理中…" : visible ? "隐藏" : "添加"}</button></article>; })}</div>
           <div className="desktop-menu-tip"><MoreHorizontal /><p><strong>桌面右键快捷添加</strong>在 Windows 桌面空白处点击右键，选择“咏智桌面挂件”，即可直接添加任一挂件。</p></div>
         </SettingsCard>
+        <SettingsCard title="挂件尺寸与位置" description="拖动标题栏摆放，边缘缩放；靠近挂件或屏幕边缘时吸附，按住 Alt 临时关闭吸附。">
+          {MINI_WIDGETS.map((widget) => <div className="widget-layout-picker" key={widget.id}><strong>{widget.name}</strong><select aria-label={`${widget.name}尺寸`} value="" disabled={Boolean(miniWidgetPending)} onChange={(event) => changeWidgetLayout(widget.id, event.target.value)}><option value="" disabled>选择尺寸</option><option value="small">紧凑</option><option value="medium">标准</option><option value="large">展开</option></select><button className="ghost-button" aria-pressed={Boolean(settings.mini_widgets?.[widget.id]?.locked)} disabled={Boolean(miniWidgetPending)} onClick={() => changeWidgetLayout(widget.id, "lock")}>{settings.mini_widgets?.[widget.id]?.locked ? "解锁" : "锁定"}</button><button className="ghost-button" disabled={Boolean(miniWidgetPending)} onClick={() => changeWidgetLayout(widget.id, "rescue")}>找回</button></div>)}
+          <div className="widget-layout-controls"><button className="ghost-button" disabled={Boolean(miniWidgetPending)} onClick={() => changeWidgetLayout(null, "save")}>保存整套布局</button><button className="ghost-button" disabled={Boolean(miniWidgetPending)} onClick={() => changeWidgetLayout(null, "restore")}>恢复已保存布局</button></div>
+        </SettingsCard>
         <SettingsCard title="挂件外观与兼容性" description="统一调整日历、备忘录、番茄钟和天气四个独立挂件的显示效果。">
-          <SettingRow title="挂件兼容模式" description="关闭高开销背景模糊，适合 Windows 11 24H2/25H2 或集成显卡电脑"><Toggle checked={settings.widget_compatibility_mode !== false} onChange={(value) => update({ widget_compatibility_mode: value }, value ? "已启用挂件兼容模式" : "已启用完整视觉效果")} /></SettingRow>
+          <SettingRow title="挂件兼容模式" description="关闭高开销背景模糊，适合 Windows 11 24H2/25H2 或集成显卡电脑"><Toggle label="挂件兼容模式" checked={settings.widget_compatibility_mode !== false} onChange={(value) => update({ widget_compatibility_mode: value }, value ? "已启用挂件兼容模式" : "已启用完整视觉效果")} /></SettingRow>
           <RangeRow label="不透明度" value={settings.opacity} min="55" max="100" onChange={(value) => update({ opacity: value })} />
           <RangeRow label="背景模糊" value={settings.blur} min="0" max="36" suffix=" px" onChange={(value) => update({ blur: value })} />
         </SettingsCard>
       </div>}
+
 
       {section === "ai" && <AISettingsPanel settings={settings} update={update} flash={flash} />}
 
@@ -1259,22 +1280,22 @@ function SettingsPage({ data, commit, importRef, flash }) {
           <div className="privacy-note"><ShieldCheck /><p><strong>安全迁移</strong>更换目录时会先复制现有数据并创建迁移备份，不删除原目录。AI 对话会同步归档到 <code>ai-chats/conversations.json</code>。</p></div>
         </SettingsCard>
         <SettingsCard title="本地数据备份" description="创建完整 JSON 备份并自动保存到当前数据目录的 backups 文件夹。">
-          <div className="backup-summary"><Download /><p><strong>备份包含全部本地数据</strong><span>日程、四象限、备忘录、剪贴板、番茄统计、AI 对话和应用设置。</span></p></div>
+          <div className="backup-summary"><Download /><p><strong>备份包含本地内容（不含 AI 密钥）</strong><span>日程、四象限、备忘录、剪贴板、番茄统计、AI 对话和应用设置。</span></p></div>
           <div className="backup-actions"><button className="ghost-button" disabled={backupPending} onClick={() => importRef.current?.click()}><Upload size={16} /> 导入备份</button><button className="primary-button" disabled={backupPending} onClick={createLocalBackup}><Download size={16} /> {backupPending ? "正在备份…" : "立即备份"}</button><input ref={importRef} type="file" hidden accept="application/json" onChange={importFile} /></div>
-          <div className="backup-warning"><Info /><span>备份可能包含 AI 服务配置，请妥善保管；应用不会主动上传备份文件。</span></div>
+          <div className="backup-warning"><Info /><span>新建备份不包含 AI 密钥；旧备份可能包含密钥，请妥善保管。</span></div>
         </SettingsCard>
       </div>}
 
       {section === "about" && <div className="settings-stack about-stack">
         <section className="panel about-hero"><span className="brand-mark brand-mark-logo"><img src={brandLogo} alt="" /></span><div><small>YZAI DESK</small><h2>咏智桌面工具</h2><p>把日程、速记、剪贴板与 AI 助手留在一个轻量桌面工作台里。</p></div><span className="version-pill">v{APP_VERSION}</span></section>
         <SettingsCard title="版本信息" description="当前应用与运行环境。">
-          <div className="about-list"><div><span>应用版本</span><strong>{APP_VERSION} 测试版</strong></div><div><span>桌面框架</span><strong>Tauri 2 + React 19</strong></div><div><span>数据位置</span><strong>安装目录 / 用户自定义</strong></div><div><span>更新方式</span><strong>当前为手动更新</strong></div></div>
+          <div className="about-list"><div><span>应用版本</span><strong>{APP_VERSION} 正式版</strong></div><div><span>桌面框架</span><strong>Tauri 2 + React 19</strong></div><div><span>数据位置</span><strong>安装目录 / 用户自定义</strong></div><div><span>更新方式</span><strong>当前为手动更新</strong></div></div>
         </SettingsCard>
         <SettingsCard title="开发信息" description="咏智桌面工具的开发与维护团队。">
           <div className="developer-info"><span className="brand-mark brand-mark-logo"><img src={brandLogo} alt="" /></span><div><small>开发作者</small><strong>无忧AI</strong></div><div><small>开发团队</small><strong>咏智AI团队</strong></div><div className="developer-links"><button className="ghost-button" onClick={openWebsite}><ExternalLink />yzai.eu.cc</button><button className="ghost-button" onClick={openRepository}><ExternalLink />GitHub · wuyouseo/yzai-desk</button></div></div>
         </SettingsCard>
-        <SettingsCard title="系统占用状态" description="显示当前咏智桌面进程的实时内存工作集，每 5 秒刷新。">
-          <div className="memory-status"><span><MemoryStick /></span><div><small>当前应用内存</small><strong>{memoryMb ? `${memoryMb.toFixed(1)} MB` : "正在读取…"}</strong><em className={memoryMb >= 400 ? "high" : memoryMb >= 200 ? "medium" : ""}>{memoryMb ? memoryLevel : "桌面端实时统计"}</em></div><div className="memory-meter"><i style={{ width: `${memoryPercent}%` }} /></div></div>
+        <SettingsCard title="系统占用状态" description="显示主进程的内存工作集，每 5 秒刷新；WebView2 子进程不计入此数字。">
+          <div className="memory-status"><span><MemoryStick /></span><div><small>主进程内存</small><strong>{memoryMb ? `${memoryMb.toFixed(1)} MB` : "正在读取…"}</strong><em className={memoryMb >= 400 ? "high" : memoryMb >= 200 ? "medium" : ""}>{memoryMb ? memoryLevel : "桌面端实时统计"}</em></div><div className="memory-meter"><i style={{ width: `${memoryPercent}%` }} /></div></div>
         </SettingsCard>
       </div>}
     </div>
@@ -1346,7 +1367,7 @@ function AISettingsPanel({ settings, update, flash }) {
   const isNew = Boolean(draft && !providers.some((provider) => provider.id === draft.id));
   const displayedProviders = isNew ? [...providers, draft] : providers;
 
-  useEffect(() => { if (selected) setDraft({ ...selected }); }, [selectedId, selected]);
+  useEffect(() => { if (selected) setDraft({ ...selected }); }, [selectedId]);
 
   const addProvider = () => {
     const provider = { id: uid(), name: `自定义服务 ${providers.length + 1}`, protocol: "openai", base_url: "", model_id: "", models: [], capability: "chat", description: "OpenAI 兼容自定义服务", docs_url: "", api_key: "" };
@@ -1422,7 +1443,7 @@ function EventModal({ draft, setDraft, onSave, onClose }) {
 
 function PanelHead({ title, action, onClick }) { return <div className="panel-head"><h2>{title}</h2>{action && <button onClick={onClick}>{action}<ChevronRight size={15} /></button>}</div>; }
 function EmptyState({ icon: Icon, text, action, onClick }) { return <div className="empty-state"><span><Icon /></span><p>{text}</p>{action && <button onClick={onClick}>{action}</button>}</div>; }
-function Toggle({ checked, onChange }) { return <button className={`toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><i /></button>; }
+function Toggle({ checked, onChange, label }) { return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`toggle ${checked ? "on" : ""}`} onClick={() => onChange(!checked)}><i /></button>; }
 function SettingRow({ title, description, children }) { return <div className="setting-row"><div><strong>{title}</strong><span>{description}</span></div>{children}</div>; }
 function RangeRow({ label, value, min, max, step = "1", suffix = "%", onChange }) { return <div className="range-row"><div><strong>{label}</strong><span>{value}{suffix}</span></div><input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} /></div>; }
 

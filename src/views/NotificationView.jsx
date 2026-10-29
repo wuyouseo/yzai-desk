@@ -13,6 +13,7 @@ function NotificationView() {
       setClosing(false);
       setVisible(true);
     });
+    off.then(() => { if (isTauri()) callCommand("notification_ready").catch(() => {}); });
     return () => { off.then((cleanup) => cleanup()); };
   }, []);
 
@@ -21,7 +22,7 @@ function NotificationView() {
     setClosing(true);
     try {
       if (isTauri()) await callCommand("hide_notification");
-      setVisible(false);
+      if (!isTauri()) setVisible(false);
     } catch (error) {
       console.error("隐藏提醒窗口失败", error);
       setClosing(false);
@@ -38,7 +39,7 @@ function NotificationView() {
         minutes: 5,
       });
       if (isTauri()) await callCommand("hide_notification");
-      setVisible(false);
+      if (!isTauri()) setVisible(false);
     } catch (error) {
       console.error("稍后提醒设置失败", error);
       setClosing(false);

@@ -1,7 +1,7 @@
 {
   "name": "yzai-desk",
   "private": true,
-  "version": "0.6.7",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,11 @@
     "desktop:dev": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tauri-dev.ps1",
     "desktop:build": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/tauri-build.ps1",
     "weather:check": "node scripts/check-weather-cities.mjs",
-    "ai:check": "node scripts/check-ai-provider-migration.mjs"
+    "ai:check": "node scripts/check-ai-provider-migration.mjs",
+    "core:check": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/core-test.ps1",
+    "ai:stream-check": "node scripts/check-ai-stream.mjs",
+    "pomo:check": "node scripts/check-pomo.mjs",
+    "widgets:check": "node scripts/check-widget-layout.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

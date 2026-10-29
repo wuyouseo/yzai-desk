@@ -1,9 +1,14 @@
 mod db;
+mod data_merge;
+mod data_secrets;
+mod event_schedule;
 mod startup;
 mod clipboard;
 mod alarm;
 mod hotkey;
 mod window_custom;
+mod widget_geometry;
+mod widget_controls;
 mod desktop_integration;
 mod system_fonts;
 mod system_status;
@@ -27,15 +32,26 @@ fn show_settings_window(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let startup_action = desktop_integration::requested_action();
+    let safe_preview = cfg!(debug_assertions) && std::env::var_os("YZAI_SAFE_PREVIEW").is_some();
     // Reuse the existing process for both shell actions and ordinary launches.
     // This prevents duplicate clipboard listeners, alarm schedulers and writers.
     let launch_action = startup_action.as_deref().unwrap_or("settings");
-    if desktop_integration::forward_to_running_app(launch_action) {
+    if !safe_preview && desktop_integration::forward_to_running_app(launch_action) {
         return;
     }
 
     // Initialize Database
-    db::init_db().expect("Failed to initialize local database");
+    if let Err(error) = db::init_db() {
+        eprintln!("Failed to initialize local database: {error}");
+        #[cfg(windows)]
+        unsafe {
+            use std::os::windows::ffi::OsStrExt;
+            let message: Vec<u16> = std::ffi::OsStr::new(&error).encode_wide().chain(Some(0)).collect();
+            let title: Vec<u16> = std::ffi::OsStr::new("咏智桌面工具 - 数据读取失败").encode_wide().chain(Some(0)).collect();
+            windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(0, message.as_ptr(), title.as_ptr(), 0x10);
+        }
+        return;
+    }
 
     tauri::Builder::default()
         // Register tauri-plugin-global-shortcut
@@ -50,24 +66,20 @@ pub fn run() {
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
-            if let Err(error) = desktop_integration::start_action_listener(app_handle.clone()) {
-                eprintln!("Failed to start desktop action listener: {}", error);
+            if !safe_preview {
+                if let Err(error) = desktop_integration::start_action_listener(app_handle.clone()) {
+                    eprintln!("Failed to start desktop action listener: {}", error);
+                }
+                if let Err(error) = desktop_integration::register_desktop_context_menu() {
+                    eprintln!("Failed to register desktop context menu: {}", error);
+                }
+                clipboard::start_clipboard_listener(app_handle.clone());
+                alarm::start_alarm_scheduler(app_handle.clone());
+                if let Err(error) = hotkey::setup_global_shortcut(app) {
+                    eprintln!("Failed to register global hotkey: {}", error);
+                }
             }
-            if let Err(error) = desktop_integration::register_desktop_context_menu() {
-                eprintln!("Failed to register desktop context menu: {}", error);
-            }
-            
-            // Start Clipboard Background Listener
-            clipboard::start_clipboard_listener(app_handle.clone());
-            
-            // Start Alarm Background Scheduler
-            alarm::start_alarm_scheduler(app_handle.clone());
-            
-            // Register global hotkey Alt+Space
-            if let Err(e) = hotkey::setup_global_shortcut(app) {
-                eprintln!("Failed to register global hotkey: {}", e);
-            }
-            
+
             // Configure Settings window to hide instead of closing
             if let Some(settings_win) = app.get_webview_window("settings") {
                 let s_clone = settings_win.clone();
@@ -162,6 +174,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::get_data,
             db::save_data,
+            db::restore_data,
             db::export_data,
             db::import_data,
             db::get_storage_info,
@@ -175,17 +188,25 @@ pub fn run() {
             startup::get_autostart,
             clipboard::clean_paste,
             clipboard::clear_clipboard,
+            alarm::set_pomo_duration,
             alarm::start_pomo,
             alarm::pause_pomo,
             alarm::stop_pomo,
             alarm::get_active_pomo,
             alarm::snooze_notification,
             alarm::hide_notification,
+            alarm::notification_ready,
             window_custom::set_mini_widget_visibility,
             window_custom::toggle_mini_widget_visibility,
             window_custom::get_mini_widget_states,
             window_custom::show_settings_window,
             window_custom::start_window_drag,
+            widget_controls::begin_widget_gesture,
+            widget_controls::update_widget_gesture,
+            widget_controls::end_widget_gesture,
+            widget_controls::widget_action,
+            widget_controls::save_widget_layout,
+            widget_controls::restore_widget_layout,
             desktop_integration::install_desktop_context_menu,
             desktop_integration::remove_desktop_context_menu,
             system_fonts::get_system_fonts,

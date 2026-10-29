@@ -5,6 +5,7 @@ import QuickPanel from "./views/QuickPanel";
 import NotificationView from "./views/NotificationView";
 import MiniWidgetView from "./views/MiniWidgetView";
 import { applyAppearance, loadData, subscribe } from "./lib/deskApi";
+import "./Widget.css";
 
 function App() {
   const getRoute = () => window.location.hash.replace(/^#\/?/, "");
@@ -23,7 +24,7 @@ function App() {
       currentSettings = settings;
       applyAppearance(settings);
     };
-    loadData().then((data) => syncAppearance(data.settings));
+    loadData().then((data) => syncAppearance(data.settings)).catch((error) => console.error("无法读取外观设置", error));
     const off = subscribe("settings-changed", syncAppearance);
     const handleResize = () => {
       window.cancelAnimationFrame(resizeFrame);
@@ -31,8 +32,12 @@ function App() {
         if (currentSettings) applyAppearance(currentSettings);
       });
     };
+    const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const handleSystemTheme = () => { if (currentSettings?.theme === "system") applyAppearance(currentSettings); };
+    systemTheme?.addEventListener("change", handleSystemTheme);
     window.addEventListener("resize", handleResize);
     return () => {
+      systemTheme?.removeEventListener("change", handleSystemTheme);
       window.removeEventListener("resize", handleResize);
       window.cancelAnimationFrame(resizeFrame);
       off.then((cleanup) => cleanup());

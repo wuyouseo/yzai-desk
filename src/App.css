@@ -1098,3 +1098,98 @@ body:has(.quick-root), body:has(.notification-root), body:has(.mini-widget-root)
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Keep secondary text legible and keyboard focus visible in every theme. */
+.sidebar-foot, .privacy-card span, .widget-catalog article small { font-size: max(12px, calc(8px * var(--font-scale))); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+
+/* Duration controls are shared by the full timer and its desktop widget. */
+.focus-duration { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 100%; }
+.focus-duration-options, .focus-duration-custom { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.focus-duration-options button, .focus-duration-custom button { min-height: 34px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--input-bg); color: var(--text); cursor: pointer; font-size: max(12px, calc(9px * var(--font-scale))); }
+.focus-duration-options button.active { color: var(--purple); border-color: var(--purple); background: var(--purple-soft); }
+.focus-duration button:disabled { opacity: .55; cursor: not-allowed; }
+.focus-duration-custom input { width: 72px; min-width: 0; height: 34px; padding: 0 7px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--input-bg); color: var(--text); text-align: center; }
+.focus-duration-custom span, .focus-duration-hint { color: var(--muted); font-size: 12px; }
+.focus-duration-hint { margin-top: 7px; }
+.focus-duration-error { display: block; color: var(--danger); font-size: 12px; text-align: center; }
+.timer-panel { overflow: visible; }
+.mini-widget-focus { container-type: size; }
+.standalone-focus { justify-content: center; gap: clamp(5px, 1.8cqh, 12px); padding: 2px 0; }
+.standalone-focus-ring { position: relative; flex: 0 0 auto; width: clamp(66px, min(30cqh, 48cqw), 150px); height: auto; aspect-ratio: 1; }
+.standalone-focus-ring::before { width: 85%; height: 85%; }
+.standalone-focus-ring strong { font-size: clamp(16px, 5.4cqh, 32px); }
+.standalone-focus-ring span { font-size: clamp(9px, 2.2cqh, 12px); margin-top: 0; }
+.focus-duration-compact { width: 100%; gap: 3px; }
+.standalone-focus .focus-duration-options { gap: 4px; }
+.standalone-focus .focus-duration-options button { min-height: 25px; height: clamp(25px, 7cqh, 36px); padding: 0 clamp(7px, 2.5cqw, 13px); font-size: clamp(11px, 2.5cqh, 13px); }
+.standalone-focus .focus-duration-custom { gap: 4px; }
+.standalone-focus .focus-duration-custom input { width: 48px; height: 25px; font-size: 11px; }
+.standalone-focus .focus-duration-custom span { font-size: 10px; }
+.standalone-focus .focus-duration-custom button { min-height: 25px; height: 25px; padding: 0 7px; font-size: 10px; }
+.standalone-focus .focus-duration-error { font-size: 10px; }
+.focus-widget-actions { display: flex; gap: 6px; }
+.standalone-focus .focus-widget-actions button { height: clamp(29px, 7.5cqh, 38px); padding: 0 clamp(10px, 3cqw, 16px); font-size: clamp(11px, 2.5cqh, 13px); }
+.standalone-focus .focus-widget-actions button svg { width: 14px; }
+@container (max-height: 260px) {
+  .standalone-focus:has(.focus-duration-custom) { gap: 2px; }
+  .standalone-focus:has(.focus-duration-custom) .standalone-focus-ring { width: 54px; }
+}
+
+/* Glass desktop widgets: a translucent tint with accessible contrast. */
+.mini-widget-root {
+  --widget-ink: #17243a; --widget-muted: #536279; --widget-line: rgba(255,255,255,.66);
+  --widget-surface: rgba(255,255,255,.46); --widget-accent: #665ce4;
+  color: var(--widget-ink); padding: 12px 14px 13px; border: 1px solid var(--widget-line); border-radius: 20px;
+  background: linear-gradient(145deg, color-mix(in srgb, #f7faff var(--widget-alpha), transparent), color-mix(in srgb, #e3ebfa var(--widget-alpha), transparent));
+  box-shadow: inset 0 1px rgba(255,255,255,.76), 0 12px 34px rgba(22,35,61,.18);
+}
+:root:not([data-theme="cloud"]) .mini-widget-root {
+  --widget-ink: #f1f5ff; --widget-muted: #c4cee0; --widget-line: rgba(255,255,255,.17);
+  --widget-surface: rgba(255,255,255,.09); --widget-accent: #b3a9ff;
+  background: linear-gradient(145deg, color-mix(in srgb, #18243b var(--widget-alpha), transparent), color-mix(in srgb, #172131 var(--widget-alpha), transparent));
+  box-shadow: inset 0 1px rgba(255,255,255,.12), 0 12px 34px rgba(4,10,25,.3);
+}
+.mini-widget-root.widget-compat-mode { box-shadow: inset 0 1px rgba(255,255,255,.36), 0 8px 22px rgba(19,30,52,.16); }
+.mini-widget-header { height: 32px; display: flex; gap: 5px; border: 0; }
+.mini-widget-header > .mini-widget-title { justify-content: flex-start; flex: 1; gap: 8px; }
+.mini-widget-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--widget-line); background: var(--widget-surface); }
+.mini-widget-header > .mini-widget-title svg { width: 14px; color: var(--widget-accent); }
+.mini-widget-header strong { color: var(--widget-ink); font-size: 12px; letter-spacing: 0; }
+.mini-widget-grip { color: var(--widget-muted); }
+.mini-widget-header > button { color: var(--widget-muted); }
+.standalone-date { min-height: 54px; padding: 10px 2px 4px; gap: 5px; }
+.standalone-date strong { color: var(--widget-ink); font-size: 37px; }
+.standalone-date span, .standalone-date p { color: var(--widget-muted); font-size: 11px; }
+.standalone-date p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-calendar-toolbar { padding: 0 2px; }
+.mini-calendar-toolbar strong { color: var(--widget-ink); font-size: 12px; }
+.mini-calendar-toolbar button, .mini-calendar-week { color: var(--widget-muted); }
+.mini-calendar-toolbar button.mini-today-button { color: var(--widget-accent); background: var(--widget-surface); font-size: 10px; }
+.mini-calendar-week { font-size: 10px; padding: 5px 0 2px; }
+.mini-calendar-grid { row-gap: 2px; }
+.mini-calendar-grid button, .mini-calendar-grid i { color: var(--widget-ink); width: min(29px,100%); height: 27px; font-size: 12px; }
+.mini-calendar-grid button.today { color: white; background: #665ce4; box-shadow: 0 4px 12px rgba(102,92,228,.24); }
+.mini-calendar-grid button em { background: var(--widget-accent); }
+.standalone-note { height: calc(100% - 32px); padding: 8px 0 0; }
+.standalone-note textarea { border-color: var(--widget-line); color: var(--widget-ink); background: var(--widget-surface); font-size: 13px; line-height: 1.65; }
+.standalone-note textarea::placeholder { color: var(--widget-muted); }
+.standalone-note small { color: var(--widget-muted); font-size: 10px; }
+.mini-note-add { color: var(--widget-accent); background: var(--widget-surface); border-color: var(--widget-line); }
+.standalone-focus { height: calc(100% - 32px); }
+.standalone-focus-ring { background: conic-gradient(var(--widget-accent) var(--angle), var(--widget-surface) 0); box-shadow: 0 0 28px color-mix(in srgb, var(--widget-accent) 18%, transparent); }
+.standalone-focus-ring::before { background: color-mix(in srgb, var(--panel-solid) 88%, transparent); }
+.standalone-focus-ring strong { color: var(--widget-ink); }
+.standalone-focus-ring span { color: var(--widget-muted); }
+.standalone-focus button, .standalone-focus .focus-duration-custom input { border-color: var(--widget-line); color: var(--widget-ink); background: var(--widget-surface); }
+.standalone-focus .focus-duration-options button.active { color: #fff; background: #665ce4; border-color: #665ce4; }
+.standalone-focus button.mini-primary { background: #665ce4; border-color: #665ce4; color: #fff; }
+.standalone-weather { height: calc(100% - 32px); grid-template-columns: 1fr auto; padding: 4px 1px 0; background: none; }
+.weather-main > span { color: #e9a73d; background: var(--widget-surface); border: 1px solid var(--widget-line); border-radius: 12px; }
+.weather-main strong { color: var(--widget-ink); font-size: 32px; }
+.weather-main p, .weather-details span, .standalone-weather time { color: var(--widget-muted); font-size: 10px; }
+.weather-details { padding: 7px 8px; border: 1px solid var(--widget-line); border-radius: 10px; background: var(--widget-surface); }
+.weather-details strong { color: var(--widget-ink); font-size: 10px; }
+
+/* Transparent native windows must not inherit the app's opaque root canvas. */
+html:has(.mini-widget-root), html:has(.mini-widget-loading) { background: transparent !important; }

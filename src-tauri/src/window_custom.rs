@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{mpsc, OnceLock};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 use serde_json::{json, Value};
 use crate::db;
 
@@ -20,6 +20,7 @@ struct GeometryUpdate {
     key: String,
     position: Option<PhysicalPosition<i32>>,
     size: Option<PhysicalSize<u32>>,
+    placement: Option<Value>,
 }
 
 fn geometry_sender() -> &'static mpsc::Sender<GeometryUpdate> {
@@ -34,7 +35,7 @@ fn geometry_sender() -> &'static mpsc::Sender<GeometryUpdate> {
                     merge_geometry_update(&mut pending, update);
                 }
                 for update in pending.into_values() {
-                    let result = persist_mini_widget_geometry(&update.key, update.position, update.size);
+                    let result = persist_mini_widget_geometry(&update.key, update.position, update.size, update.placement);
                     if let Err(error) = result {
                         eprintln!("Failed to persist widget geometry: {error}");
                     }
@@ -58,11 +59,13 @@ fn merge_geometry_update(
             if update.size.is_some() {
                 current.size = update.size;
             }
+            if update.placement.is_some() { current.placement = update.placement.clone(); }
         })
         .or_insert(update);
 }
 
 pub fn queue_mini_widget_geometry(
+    window: &WebviewWindow,
     kind: &str,
     position: Option<PhysicalPosition<i32>>,
     size: Option<PhysicalSize<u32>>,
@@ -71,6 +74,7 @@ pub fn queue_mini_widget_geometry(
         key: kind.to_string(),
         position,
         size,
+        placement: widget_placement(window).ok(),
     });
 }
 
@@ -78,6 +82,7 @@ pub fn persist_mini_widget_geometry(
     kind: &str,
     position: Option<PhysicalPosition<i32>>,
     size: Option<PhysicalSize<u32>>,
+    placement: Option<Value>,
 ) -> Result<(), String> {
     mini_widget_label(kind)?;
     db::update_db(|data| {
@@ -93,8 +98,18 @@ pub fn persist_mini_widget_geometry(
                 "height": size.height,
             });
         }
+        if let Some(placement) = placement { data["settings"]["mini_widgets"][kind]["placement"] = placement; }
         ((), position.is_some() || size.is_some())
     })
+}
+
+pub fn widget_placement(window: &WebviewWindow) -> Result<Value, String> {
+    let monitor = window.current_monitor().map_err(|e| e.to_string())?.ok_or("找不到挂件所在显示器")?;
+    let area = monitor.work_area(); let scale = monitor.scale_factor();
+    let p = window.outer_position().map_err(|e| e.to_string())?; let s = window.inner_size().map_err(|e| e.to_string())?;
+    Ok(json!({"monitor": monitor.name(), "width": s.width as f64 / scale, "height": s.height as f64 / scale,
+        "x": ((p.x - area.position.x) as f64 / (area.size.width.saturating_sub(s.width).max(1)) as f64).clamp(0., 1.),
+        "y": ((p.y - area.position.y) as f64 / (area.size.height.saturating_sub(s.height).max(1)) as f64).clamp(0., 1.)}))
 }
 
 pub fn persist_mini_widget_visibility(kind: &str, visible: bool) -> Result<(), String> {
@@ -107,13 +122,29 @@ pub fn persist_mini_widget_visibility(kind: &str, visible: bool) -> Result<(), S
 
 pub fn restore_mini_widget(kind: &str, window: &WebviewWindow) -> Result<(), String> {
     mini_widget_label(kind)?;
-    let data = db::read_db();
+    let data = db::read_db()?;
     let state = data
         .get("settings")
         .and_then(|value| value.get("mini_widgets"))
         .and_then(|value| value.get(kind));
 
-    if let Some(position) = state.and_then(|value| value.get("position")) {
+    let placement = state.and_then(|v| v.get("placement"));
+    if let Some(saved) = placement {
+        let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+        let monitor = monitors.iter().find(|m| m.name().map(String::as_str) == saved["monitor"].as_str()).or_else(|| monitors.first());
+        if let Some(m) = monitor {
+            let a = m.work_area(); let scale = m.scale_factor();
+            let size = window.inner_size().map_err(|e| e.to_string())?;
+            let width = (saved["width"].as_f64().filter(|n| n.is_finite()).unwrap_or(size.width as f64 / scale).max(1.) * scale).round() as i32;
+            let height = (saved["height"].as_f64().filter(|n| n.is_finite()).unwrap_or(size.height as f64 / scale).max(1.) * scale).round() as i32;
+            let area = crate::widget_geometry::Rect { x: a.position.x, y: a.position.y, width: a.size.width as i32, height: a.size.height as i32 };
+            let rect = crate::widget_geometry::contain(crate::widget_geometry::Rect { x: area.x + ((area.width - width).max(0) as f64 * saved["x"].as_f64().unwrap_or(0.).clamp(0., 1.)).round() as i32,
+                y: area.y + ((area.height - height).max(0) as f64 * saved["y"].as_f64().unwrap_or(0.).clamp(0., 1.)).round() as i32, width, height }, area);
+            window.set_size(PhysicalSize::new(rect.width as u32, rect.height as u32)).map_err(|e| e.to_string())?;
+            window.set_position(PhysicalPosition::new(rect.x, rect.y)).map_err(|e| e.to_string())?;
+        }
+    }
+    if placement.is_none() { if let Some(position) = state.and_then(|value| value.get("position")) {
         if let (Some(x), Some(y)) = (
             position.get("x").and_then(|value| value.as_i64()),
             position.get("y").and_then(|value| value.as_i64()),
@@ -134,6 +165,9 @@ pub fn restore_mini_widget(kind: &str, window: &WebviewWindow) -> Result<(), Str
                 .map_err(|error| error.to_string())?;
         }
     }
+    }
+    window.set_resizable(!state.and_then(|v| v.get("locked")).and_then(|v| v.as_bool()).unwrap_or(false)).map_err(|e| e.to_string())?;
+    window.set_always_on_top(state.and_then(|v| v.get("always_on_top")).and_then(|v| v.as_bool()).unwrap_or(false)).map_err(|e| e.to_string())?;
 
     if state
         .and_then(|value| value.get("visible"))
@@ -145,8 +179,29 @@ pub fn restore_mini_widget(kind: &str, window: &WebviewWindow) -> Result<(), Str
     Ok(())
 }
 
+pub fn keep_widget_on_screen(window: &WebviewWindow) -> Result<(), String> {
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.inner_size().map_err(|e| e.to_string())?;
+    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+    let visible = monitors.iter().find(|m| {
+        let area = m.work_area();
+        let x = i64::from(position.x); let y = i64::from(position.y);
+        x + i64::from(size.width) / 2 >= i64::from(area.position.x) && x + i64::from(size.width) / 2 < i64::from(area.position.x) + i64::from(area.size.width)
+            && y + i64::from(size.height) / 2 >= i64::from(area.position.y) && y + i64::from(size.height) / 2 < i64::from(area.position.y) + i64::from(area.size.height)
+    });
+    let monitor = visible.cloned().or(window.primary_monitor().map_err(|e| e.to_string())?).or_else(|| monitors.into_iter().next());
+    if let Some(monitor) = monitor {
+            let area = monitor.work_area();
+            let rect = crate::widget_geometry::contain(crate::widget_geometry::Rect { x: position.x, y: position.y, width: size.width as i32, height: size.height as i32 }, crate::widget_geometry::Rect { x: area.position.x, y: area.position.y, width: area.size.width as i32, height: area.size.height as i32 });
+            if rect.width != size.width as i32 || rect.height != size.height as i32 { window.set_size(PhysicalSize::new(rect.width as u32, rect.height as u32)).map_err(|e| e.to_string())?; }
+            if rect.x != position.x || rect.y != position.y { window.set_position(PhysicalPosition::new(rect.x, rect.y)).map_err(|e| e.to_string())?; }
+    }
+    Ok(())
+}
+
 fn configure_mini_widget_window(kind: &str, window: &WebviewWindow) -> Result<(), String> {
     restore_mini_widget(kind, window)?;
+    keep_widget_on_screen(window)?;
     let window_clone = window.clone();
     let kind_owned = kind.to_string();
     window.on_window_event(move |event| match event {
@@ -154,12 +209,16 @@ fn configure_mini_widget_window(kind: &str, window: &WebviewWindow) -> Result<()
             api.prevent_close();
             let _ = window_clone.hide();
             let _ = persist_mini_widget_visibility(&kind_owned, false);
+            let _ = window_clone.app_handle().emit("widget-visibility-changed", json!({ "kind": kind_owned, "visible": false }));
         }
         tauri::WindowEvent::Moved(position) => {
-            queue_mini_widget_geometry(&kind_owned, Some(*position), None);
+            queue_mini_widget_geometry(&window_clone, &kind_owned, Some(*position), None);
         }
         tauri::WindowEvent::Resized(size) => {
-            queue_mini_widget_geometry(&kind_owned, None, Some(*size));
+            if size.width > 0 && size.height > 0 { queue_mini_widget_geometry(&window_clone, &kind_owned, None, Some(*size)); }
+        }
+        tauri::WindowEvent::ScaleFactorChanged { .. } => {
+            let _ = keep_widget_on_screen(&window_clone);
         }
         _ => {}
     });
@@ -188,12 +247,14 @@ pub fn show_mini_widget_by_kind(app: &AppHandle, kind: &str) -> Result<bool, Str
     // A hidden widget may still be minimized after a display change. Restoring
     // it first makes both the settings button and the desktop menu deterministic.
     let _ = window.unminimize();
+    keep_widget_on_screen(&window)?;
     window.show().map_err(|error| error.to_string())?;
     // Windows can reject focus stealing when the request comes from Explorer's
     // context menu. The widget is already visible, so focus is best-effort and
     // must not turn a successful Add action into an error.
     let _ = window.set_focus();
     persist_mini_widget_visibility(kind, true)?;
+    let _ = app.emit("widget-visibility-changed", json!({ "kind": kind, "visible": true }));
     Ok(true)
 }
 
@@ -203,6 +264,7 @@ pub fn hide_mini_widget_by_kind(app: &AppHandle, kind: &str) -> Result<bool, Str
         window.hide().map_err(|error| error.to_string())?;
     }
     persist_mini_widget_visibility(kind, false)?;
+    let _ = app.emit("widget-visibility-changed", json!({ "kind": kind, "visible": false }));
     Ok(false)
 }
 
@@ -254,5 +316,8 @@ pub fn show_settings_window(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn start_window_drag(window: WebviewWindow) -> Result<(), String> {
+    if let Some(kind) = window.label().strip_prefix("mini-") {
+        if db::read_db()?["settings"]["mini_widgets"][kind]["locked"].as_bool().unwrap_or(false) { return Err("请先解锁挂件位置".into()); }
+    }
     window.start_dragging().map_err(|error| error.to_string())
 }

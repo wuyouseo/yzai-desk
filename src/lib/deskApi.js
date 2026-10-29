@@ -139,7 +139,7 @@ export const DEFAULT_DATA = {
     ai_provider_catalog_version: AI_PROVIDER_CATALOG_VERSION,
     active_ai_provider_id: "deepseek-openai",
     ai_providers: AI_PROVIDER_PRESETS.map(createPresetProvider),
-    pomo_duration: 25,
+    pomo_duration: 15,
     sensitive_auto_clear: true,
     note_password_config: null,
     mini_widgets: {
@@ -160,7 +160,9 @@ export function applyAppearance(settings = {}) {
   const viewportWidth = Math.max(320, Number(window.innerWidth) || 1280);
   const viewportBoost = Math.min(1.16, Math.max(1, 1 + (viewportWidth - 1280) / 8000));
   const readableScale = 1.32 * viewportBoost * (fontSize / 100);
-  root.dataset.theme = settings.theme || "cloud";
+  root.dataset.theme = settings.theme === "system"
+    ? (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "obsidian" : "cloud")
+    : settings.theme || "cloud";
   root.style.setProperty(
     "--app-font-family",
     selectedFont === "system"
@@ -320,13 +322,15 @@ export async function loadData() {
   }
 }
 
-export async function saveData(data, changedSections) {
+export async function saveData(data, changedSections, baseData) {
   const normalized = mergeData(data);
   if (isTauri()) {
-    const saved = await invoke("save_data", { data: normalized, changedSections: changedSections ?? null });
+    const saved = await invoke("save_data", { data: normalized, changedSections: changedSections ?? null, baseData: baseData ? mergeData(baseData) : null });
     return mergeData(saved);
   }
   localStorage.setItem("yzai-desk-preview", JSON.stringify(normalized));
+  window.dispatchEvent(new CustomEvent("yzai-preview-data-changed", { detail: normalized }));
+  window.dispatchEvent(new CustomEvent("yzai-preview-settings-changed", { detail: normalized.settings }));
   return normalized;
 }
 
@@ -336,12 +340,27 @@ export async function callCommand(command, args = {}) {
 }
 
 export async function subscribe(event, handler) {
-  if (!isTauri()) return () => {};
-  return listen(event, ({ payload }) => handler(payload));
+  if (!isTauri()) {
+    if (!["data-changed", "settings-changed"].includes(event)) return () => {};
+    const local = (message) => handler(message.detail);
+    const storage = (message) => {
+      if (message.key !== "yzai-desk-preview" || !message.newValue) return;
+      try { const data = mergeData(JSON.parse(message.newValue)); handler(event === "settings-changed" ? data.settings : data); } catch { /* Ignore invalid preview state. */ }
+    };
+    window.addEventListener(`yzai-preview-${event}`, local);
+    window.addEventListener("storage", storage);
+    return () => { window.removeEventListener(`yzai-preview-${event}`, local); window.removeEventListener("storage", storage); };
+  }
+  return listen(event, ({ payload }) => handler(event === "data-changed" ? mergeData(payload) : payload));
 }
 
 export function exportBackup(data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const portable = structuredClone(data);
+  if (portable.settings) {
+    portable.settings.ai_api_key = "";
+    portable.settings.ai_providers?.forEach((provider) => { provider.api_key = ""; });
+  }
+  const blob = new Blob([JSON.stringify(portable, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -356,7 +375,7 @@ export function readBackup(file) {
     reader.onload = () => {
       try {
         const data = JSON.parse(String(reader.result));
-        if (!Array.isArray(data.events) || !Array.isArray(data.notes) || !data.settings) {
+        if (!Array.isArray(data.events) || !Array.isArray(data.notes) || !data.settings || typeof data.settings !== "object" || Array.isArray(data.settings)) {
           throw new Error("这不是有效的咏智桌面备份文件");
         }
         resolve(mergeData(data));
@@ -464,7 +483,7 @@ export async function decryptNote(note, password) {
   }
 }
 
-export async function askAI(messages, settings, onChunk) {
+export async function askAI(messages, settings, onChunk, { signal, timeoutMs = 120_000 } = {}) {
   const provider = getActiveAIProvider(settings);
   if (!provider?.api_key) throw new Error("请先在系统设置中填写当前 AI 服务的 API Key");
   if (!provider.base_url) throw new Error("请填写 AI 服务的 Base URL");
@@ -535,44 +554,51 @@ export async function askAI(messages, settings, onChunk) {
       temperature: 0.6,
     };
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    throw new Error(`AI 服务返回 ${response.status}${detail ? `：${detail.slice(0, 160)}` : ""}`);
-  }
-  if (!response.body) throw new Error("当前 AI 服务不支持流式响应");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let answer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    for (const line of lines) {
-      if (!line.startsWith("data:")) continue;
-      const body = line.slice(5).trim();
-      if (!body || body === "[DONE]") continue;
-      try {
-        const payload = JSON.parse(body);
-        const chunk = isAnthropic
-          ? payload.type === "content_block_delta" ? payload.delta?.text || "" : ""
-          : payload.choices?.[0]?.delta?.content || "";
-        answer += chunk;
-        onChunk(answer);
-      } catch {
-        // Ignore provider heartbeat lines that are not JSON payloads.
-      }
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer;
+  const abort = () => controller.abort();
+  const resetTimeout = () => { clearTimeout(timer); timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs); };
+  if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
+  resetTimeout();
+  try {
+    const response = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body), signal: controller.signal });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`AI 服务返回 ${response.status}${detail ? `：${detail.slice(0, 160)}` : ""}`);
     }
+    if (!response.body) throw new Error("当前 AI 服务不支持流式响应");
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let answer = "";
+    const consume = (line) => {
+      if (!line.startsWith("data:")) return;
+      const body = line.slice(5).trim();
+      if (!body || body === "[DONE]") return;
+      let payload;
+      try { payload = JSON.parse(body); } catch { return; }
+      if (payload.error || payload.type === "error") throw new Error(payload.error?.message || "AI 服务返回流式错误");
+      const chunk = isAnthropic ? payload.type === "content_block_delta" ? payload.delta?.text || "" : "" : payload.choices?.[0]?.delta?.content || "";
+      if (typeof chunk === "string" && chunk) { answer += chunk; onChunk(answer); }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      resetTimeout();
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      lines.forEach(consume);
+    }
+    buffer += decoder.decode();
+    if (buffer) consume(buffer);
+    return answer;
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(timedOut ? "请求超时，请检查网络或稍后重试" : "已停止生成");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
-  return answer;
 }
